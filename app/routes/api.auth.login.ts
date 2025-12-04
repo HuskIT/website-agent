@@ -20,7 +20,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   try {
-    // ✅ CSRF Protection
     const csrfToken = getCsrfTokenFromCookies(request);
 
     if (!verifyCsrfToken(request, csrfToken)) {
@@ -28,7 +27,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
       return Response.json({ error: 'Invalid CSRF token. Please refresh and try again.' }, { status: 403 });
     }
 
-    // ✅ Parse và validate request body
     let body: any;
 
     try {
@@ -49,12 +47,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const email = sanitizeInput(body.email, 254);
     const password = body.password;
 
-    // ✅ IMPROVED: Proper email validation
     if (!isValidEmail(email)) {
       return Response.json({ error: 'Email không hợp lệ' }, { status: 400 });
     }
 
-    // ✅ IMPROVED: Better password validation
     if (!password || password.length < 6) {
       return Response.json({ error: 'Mật khẩu phải có ít nhất 6 ký tự' }, { status: 400 });
     }
@@ -73,7 +69,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (error) {
       console.error('Supabase auth error:', error);
 
-      // ✅ Better error messages
       const errorMessages: Record<string, string> = {
         'Invalid login credentials': 'Email hoặc mật khẩu không đúng',
         'Email not confirmed': 'Vui lòng xác nhận email trước khi đăng nhập',
@@ -93,7 +88,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
       return Response.json({ error: 'Đăng nhập thất bại' }, { status: 401 });
     }
 
-    // ✅ Return user data với session info
     return Response.json({
       success: true,
       user: {
@@ -103,7 +97,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         avatar: data.user.user_metadata?.avatar_url,
       },
       token: data.session.access_token,
-      expiresIn: data.session.expires_in, // ✅ Include expiry info
+      expiresIn: data.session.expires_in,
     });
   } catch (error) {
     console.error('Login API error:', error);

@@ -17,7 +17,6 @@ export default function AuthCallback() {
       const error = hashParams.get('error');
       const errorDescription = hashParams.get('error_description');
 
-      // ✅ SECURITY: Clear URL immediately để tokens không lưu trong history
       window.history.replaceState(null, '', window.location.pathname);
 
       if (error) {
@@ -61,7 +60,6 @@ export default function AuthCallback() {
 
         const supabase = createClient(supabaseUrl, supabaseKey);
 
-        // Verify token với Supabase
         const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
 
         if (userError || !userData.user) {
@@ -82,11 +80,9 @@ export default function AuthCallback() {
           avatar: userData.user.user_metadata?.avatar_url,
         };
 
-        // ✅ FIXED: Calculate proper expiry time
         const expiresInSeconds = expiresIn ? parseInt(expiresIn, 10) : 3600;
         const expiryTime = Date.now() + expiresInSeconds * 1000;
 
-        // ✅ Store tokens và user data
         localStorage.setItem('auth_token', accessToken);
 
         if (refreshToken) {
@@ -102,7 +98,6 @@ export default function AuthCallback() {
           expiresAt: new Date(expiryTime).toISOString(),
         });
 
-        // ✅ Verify session với backend
         try {
           const sessionResponse = await fetch('/api/auth/session', {
             method: 'GET',

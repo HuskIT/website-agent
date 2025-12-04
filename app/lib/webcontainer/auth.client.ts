@@ -1,5 +1,5 @@
 /**
- * ✅ FIXED: Client-side authentication với CSRF protection và security best practices
+ * Client-side authentication với CSRF protection và security best practices
  */
 
 interface LoginResponse {
@@ -33,7 +33,7 @@ class AuthClient {
   private _refreshToken: string | null = null;
   private _user: User | null = null;
   private _tokenExpiry: number | null = null;
-  private _csrfToken: string | null = null; // ✅ NEW: CSRF token storage
+  private _csrfToken: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -51,7 +51,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ NEW: Initialize CSRF token
+   * Initialize CSRF token
    */
   private async _initializeCsrfToken(): Promise<void> {
     try {
@@ -67,7 +67,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ NEW: Get CSRF token (fetch if needed)
+   * Get CSRF token (fetch if needed)
    */
   private async _getCsrfToken(): Promise<string | null> {
     if (!this._csrfToken) {
@@ -78,7 +78,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ IMPROVED: Load data từ storage với error handling
+   * Load data từ storage với error handling
    */
   private _loadFromStorage(): void {
     try {
@@ -103,7 +103,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ Clear all localStorage data
+   * Clear all localStorage data
    */
   private _clearLocalStorage(): void {
     if (typeof window !== 'undefined') {
@@ -120,7 +120,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ FIXED: Check token expiry với buffer time
+   * Check token expiry với buffer time
    */
   private _isTokenExpired(): boolean {
     if (!this._tokenExpiry) {
@@ -132,7 +132,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ IMPROVED: Refresh token với proper error handling
+   * Refresh token với proper error handling
    */
   private async _refreshAccessToken(): Promise<boolean> {
     if (!this._refreshToken) {
@@ -164,7 +164,7 @@ class AuthClient {
         return false;
       }
 
-      // ✅ FIXED: Use actual expiry from Supabase session
+      // Use actual expiry from Supabase session
       const expiresAt = data.session.expires_at
         ? data.session.expires_at * 1000 // Convert to milliseconds
         : Date.now() + 60 * 60 * 1000; // Fallback to 1 hour
@@ -189,7 +189,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ Get valid token (refresh if needed)
+   * Get valid token (refresh if needed)
    */
   private async _getValidToken(): Promise<string | null> {
     if (!this._token) {
@@ -208,18 +208,17 @@ class AuthClient {
   }
 
   /**
-   * ✅ FIXED: Login với CSRF protection
+   * Login với CSRF protection
    */
   async login(email: string, password: string): Promise<LoginResponse> {
     try {
-      // ✅ Get CSRF token
       const csrfToken = await this._getCsrfToken();
 
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(csrfToken && { 'X-CSRF-Token': csrfToken }), // ✅ Include CSRF
+          ...(csrfToken && { 'X-CSRF-Token': csrfToken }),
         },
         body: JSON.stringify({ email, password }),
       });
@@ -239,7 +238,7 @@ class AuthClient {
         this._token = token;
         this._user = user;
 
-        // ✅ IMPROVED: Try to get actual expiry, fallback to 1 hour
+        // Try to get actual expiry, fallback to 1 hour
         const expiryTime = Date.now() + 60 * 60 * 1000;
         this._tokenExpiry = expiryTime;
 
@@ -261,18 +260,17 @@ class AuthClient {
   }
 
   /**
-   * ✅ FIXED: Register với CSRF protection
+   * Register với CSRF protection
    */
   async register(email: string, password: string, name?: string): Promise<RegisterResponse> {
     try {
-      // ✅ Get CSRF token
       const csrfToken = await this._getCsrfToken();
 
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(csrfToken && { 'X-CSRF-Token': csrfToken }), // ✅ Include CSRF
+          ...(csrfToken && { 'X-CSRF-Token': csrfToken }),
         },
         body: JSON.stringify({ email, password, name }),
       });
@@ -301,7 +299,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ Login with Google OAuth
+   * Login with Google OAuth
    */
   async loginWithGoogle(): Promise<void> {
     try {
@@ -320,7 +318,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ FIXED: Logout với CSRF protection
+   * Logout với CSRF protection
    */
   async logout(): Promise<boolean> {
     try {
@@ -332,7 +330,7 @@ class AuthClient {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
-            ...(csrfToken && { 'X-CSRF-Token': csrfToken }), // ✅ Include CSRF
+            ...(csrfToken && { 'X-CSRF-Token': csrfToken }),
           },
         });
       }
@@ -349,7 +347,7 @@ class AuthClient {
   }
 
   /**
-   * ✅ Check authentication status
+   * Check authentication status
    */
   async checkAuth(): Promise<boolean> {
     const token = await this._getValidToken();
@@ -388,35 +386,35 @@ class AuthClient {
   }
 
   /**
-   * ✅ Get current user
+   * Get current user
    */
   getUser(): User | null {
     return this._user;
   }
 
   /**
-   * ✅ Get valid token
+   * Get valid token
    */
   async getToken(): Promise<string | null> {
     return this._getValidToken();
   }
 
   /**
-   * ✅ Get token sync (no refresh)
+   * Get token sync (no refresh)
    */
   getTokenSync(): string | null {
     return this._token;
   }
 
   /**
-   * ✅ Check if authenticated
+   * Check if authenticated
    */
   isAuthenticated(): boolean {
     return !!this._token && !!this._user;
   }
 
   /**
-   * ✅ Update user data
+   * Update user data
    */
   updateUser(user: User): void {
     this._user = user;

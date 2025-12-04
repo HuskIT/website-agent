@@ -7,10 +7,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const supabaseUrl = env?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const supabaseKey = env?.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
-    console.log('=== Google OAuth Init ===');
-    console.log('Supabase URL:', supabaseUrl);
-    console.log('Has Supabase Key:', !!supabaseKey);
-
     if (!supabaseUrl || !supabaseKey) {
       return Response.json(
         {
@@ -25,8 +21,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const url = new URL(request.url);
     const redirectTo = `${url.protocol}//${url.host}/auth/callback`;
-
-    console.log('Redirect URL:', redirectTo);
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -59,8 +53,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         { status: 400 },
       );
     }
-
-    console.log('OAuth URL created successfully');
 
     return Response.json({ url: data.url });
   } catch (error) {

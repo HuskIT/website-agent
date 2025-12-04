@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Loader2, UserPlus, CheckCircle2 } from 'lucide-react';
+import { authClient } from '~/lib/webcontainer/auth.client';
 
 interface RegisterProps {
   onRegisterSuccess?: () => void;
@@ -47,8 +48,8 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
         return;
       }
 
-      if (formData.password.length < 6) {
-        setError('Password must be at least 6 characters');
+      if (formData.password.length < 8) {
+        setError('Password must be at least 8 characters');
         setIsLoading(false);
 
         return;
@@ -61,30 +62,20 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
         return;
       }
 
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          name: formData.name,
-        }),
-      });
+      const result = await authClient.register(formData.email, formData.password, formData.name);
 
-      const data = (await response.json()) as { error?: string; needsConfirmation?: boolean };
-
-      if (!response.ok) {
-        setError(data.error || 'Registration failed');
+      if (!result.success) {
+        setError(result.error || 'Registration failed');
         setIsLoading(false);
 
         return;
       }
 
-      if (data.needsConfirmation) {
-        setSuccess('Registration successful! Please check your email to confirm your account.');
+      if (result.needsConfirmation) {
+        setSuccess(result.message || 'Registration successful! Please check your email to confirm your account.');
         setTimeout(() => onSwitchToLogin && onSwitchToLogin(), 3000);
       } else {
-        setSuccess('Registration successful! Redirecting to login...');
+        setSuccess(result.message || 'Registration successful! Redirecting to login...');
         setTimeout(() => {
           if (onRegisterSuccess) {
             onRegisterSuccess();
@@ -93,7 +84,8 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
           }
         }, 2000);
       }
-    } catch {
+    } catch (err) {
+      console.error('Registration error:', err);
       setError('An error occurred. Please try again.');
     } finally {
       setIsLoading(false);
@@ -105,18 +97,9 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/google');
-      const data = (await response.json()) as { url?: string; error?: string };
-
-      if (!response.ok || !data.url) {
-        setError(data.error || 'Unable to register with Google');
-        setIsLoading(false);
-
-        return;
-      }
-
-      window.location.href = data.url;
-    } catch {
+      await authClient.loginWithGoogle();
+    } catch (err) {
+      console.error('Google register error:', err);
       setError('Google registration failed');
       setIsLoading(false);
     }
@@ -156,7 +139,9 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
             required
             value={formData.name}
             onChange={handleChange}
-            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10"
+            disabled={isLoading}
+            maxLength={100}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="John Doe"
           />
         </div>
@@ -169,7 +154,9 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
             required
             value={formData.email}
             onChange={handleChange}
-            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10"
+            disabled={isLoading}
+            maxLength={254}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="you@example.com"
           />
         </div>
@@ -183,17 +170,20 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
               required
               value={formData.password}
               onChange={handleChange}
-              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10"
-              placeholder="At least 6 characters"
+              disabled={isLoading}
+              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              placeholder="At least 8 characters"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-all duration-200 hover:bg-white/10 rounded-lg"
+              disabled={isLoading}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-all duration-200 hover:bg-white/10 rounded-lg disabled:opacity-50"
             >
               {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button>
           </div>
+          <p className="text-xs text-slate-500">Must include uppercase, lowercase, number, and special character</p>
         </div>
 
         <div className="space-y-2">
@@ -205,13 +195,15 @@ export function Register({ onRegisterSuccess, onSwitchToLogin }: RegisterProps) 
               required
               value={formData.confirmPassword}
               onChange={handleChange}
-              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10"
+              disabled={isLoading}
+              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all duration-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
               placeholder="Re-enter your password"
             />
             <button
               type="button"
               onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-all duration-200 hover:bg-white/10 rounded-lg"
+              disabled={isLoading}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-all duration-200 hover:bg-white/10 rounded-lg disabled:opacity-50"
             >
               {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button>

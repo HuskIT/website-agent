@@ -20,7 +20,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   try {
-    // ✅ CSRF Protection
     const csrfToken = getCsrfTokenFromCookies(request);
 
     if (!verifyCsrfToken(request, csrfToken)) {
@@ -28,7 +27,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
       return Response.json({ error: 'Invalid CSRF token. Please refresh and try again.' }, { status: 403 });
     }
 
-    // ✅ Parse và validate request body
     let body: any;
 
     try {
@@ -50,12 +48,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const password = body.password;
     const name = body.name ? sanitizeInput(body.name, 100) : undefined;
 
-    // ✅ IMPROVED: Proper email validation
     if (!isValidEmail(email)) {
       return Response.json({ error: 'Email không hợp lệ' }, { status: 400 });
     }
 
-    // ✅ IMPROVED: Strong password validation
     const passwordCheck = isStrongPassword(password);
 
     if (!passwordCheck.valid) {
@@ -68,7 +64,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
       );
     }
 
-    // ✅ Validate name if provided
     if (name && !isValidName(name)) {
       return Response.json({ error: 'Tên không hợp lệ (1-100 ký tự, chỉ chữ cái và số)' }, { status: 400 });
     }
@@ -88,7 +83,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (error) {
       console.error('Supabase register error:', error);
 
-      // ✅ Better error messages
       const errorMessages: Record<string, string> = {
         'User already registered': 'Email đã được đăng ký',
         'Password should be at least 6 characters': 'Mật khẩu phải có ít nhất 6 ký tự',

@@ -39,14 +39,16 @@ export function verifyCsrfToken(request: Request, cookieToken: string | null): b
  * Timing-safe string comparison
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
+  const aLenght = a.length;
+  const bLength = b.length;
+  const maxLength = Math.max(aLenght, bLength);
 
-  let result = 0;
+  let result = aLenght ^ bLength;
 
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < maxLength; i++) {
+    const aChar = i < aLenght ? a.charCodeAt(i) : 0;
+    const bChar = i < bLength ? b.charCodeAt(i) : 0;
+    result |= aChar ^ bChar;
   }
 
   return result === 0;

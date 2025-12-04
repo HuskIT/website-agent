@@ -19,7 +19,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   try {
-    // ✅ CSRF Protection
     const csrfToken = getCsrfTokenFromCookies(request);
 
     if (!verifyCsrfToken(request, csrfToken)) {
@@ -29,7 +28,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const authHeader = request.headers.get('Authorization');
 
-    // If no token, user is already logged out
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return Response.json({
         success: true,
@@ -40,10 +38,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const token = authHeader.replace('Bearer ', '');
     const supabase = getSupabaseClient(context?.env);
 
-    // Verify token before logout
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
 
-    // If token is invalid, still return success
     if (userError || !userData.user) {
       return Response.json({
         success: true,
@@ -51,13 +47,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
-    // Sign out from Supabase
     const { error: signOutError } = await supabase.auth.signOut();
 
     if (signOutError) {
       console.error('Supabase logout error:', signOutError);
-
-      // Still return success so client can clear local storage
     }
 
     return Response.json({
