@@ -10,15 +10,17 @@ export class LLMManager {
   private _providers: Map<string, BaseProvider> = new Map();
   private _modelList: ModelInfo[] = [];
   private readonly _env: any = {};
+  private readonly _defaultProvider?: string;
 
-  private constructor(_env: Record<string, string>) {
+  private constructor(_env: Record<string, string>, defaultProvider?: string) {
     this._registerProvidersFromDirectory();
     this._env = _env;
+    this._defaultProvider = defaultProvider;
   }
 
-  static getInstance(env: Record<string, string> = {}): LLMManager {
+  static getInstance(env: Record<string, string> = {}, options: { defaultProvider?: string } = {}): LLMManager {
     if (!LLMManager._instance) {
-      LLMManager._instance = new LLMManager(env);
+      LLMManager._instance = new LLMManager(env, options.defaultProvider);
     }
 
     return LLMManager._instance;
@@ -198,6 +200,11 @@ export class LLMManager {
   }
 
   getDefaultProvider(): BaseProvider {
+    // Prefer the explicitly configured default provider if it exists
+    if (this._defaultProvider && this._providers.has(this._defaultProvider)) {
+      return this._providers.get(this._defaultProvider)!;
+    }
+
     const firstProvider = this._providers.values().next().value;
 
     if (!firstProvider) {
