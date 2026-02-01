@@ -59,6 +59,7 @@ export interface CreateProjectInput {
 export interface BusinessProfile {
   session_id?: string;
   gmaps_url?: string;
+  place_id?: string; // Google Place ID for crawl cache lookups
   crawled_data?: BusinessData;
   generated_content?: GeneratedContent;
   crawled_at?: string;

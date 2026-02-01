@@ -13,6 +13,7 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/node';
 import { getSession } from '~/lib/auth/session.server';
 import { extractBusinessData } from '~/lib/services/crawlerClient.server';
+import { lookupCrawlCache } from '~/lib/services/crawlCache.server';
 import type { CrawlRequest } from '~/types/crawler';
 import { logger } from '~/utils/logger';
 
@@ -59,6 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
       address,
       website_url: websiteUrl,
       place_id: placeId,
+      restaurant_data: restaurantData,
     } = payload;
 
     // Log what we received
@@ -68,6 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
       hasNameAddress: !!(businessName && address),
       hasWebsite: !!websiteUrl,
       hasPlaceId: !!placeId,
+      hasRestaurantData: !!restaurantData,
     });
 
     // Validate session_id
@@ -130,6 +133,30 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    // Cache precheck: look up existing crawl data by place_id (cross-user, TTL-aware)
+    if (placeId) {
+      const cache = await lookupCrawlCache(placeId, session.user.id);
+
+      if (cache.hit) {
+        logger.info('[API] Crawl cache HIT', {
+          sessionId,
+          placeId,
+          sourceProjectId: cache.sourceProjectId,
+          crossUser: !cache.ownedByCurrentUser,
+          crawledAt: cache.crawledAt,
+        });
+
+        return json({
+          success: true,
+          data: cache.data,
+          cached: true,
+          cachedAt: cache.crawledAt,
+        });
+      }
+
+      logger.info('[API] Crawl cache MISS', { sessionId, placeId });
+    }
+
     // Log crawler configuration for debugging
     logger.info(`[API] Calling crawler API`, {
       sessionId,
@@ -141,6 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const startTime = Date.now();
 
     // Pass the already parsed payload which matches the expected type
+    // restaurant_data is forwarded so the crawler can skip its internal SerpAPI search
     const result = await extractBusinessData({
       session_id: sessionId,
       google_maps_url: googleMapsUrl,
@@ -148,6 +176,7 @@ export async function action({ request }: ActionFunctionArgs) {
       address,
       website_url: websiteUrl,
       place_id: placeId,
+      restaurant_data: restaurantData,
     });
     const duration = Date.now() - startTime;
 

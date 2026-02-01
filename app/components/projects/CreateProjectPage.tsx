@@ -32,6 +32,7 @@ export default function CreateProjectPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResult, setSearchResult] = useState<VerifiedRestaurantData | null>(null);
+  const [searchResultRaw, setSearchResultRaw] = useState<Record<string, unknown> | null>(null);
 
   // Generation state (Phase 3)
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
@@ -147,10 +148,17 @@ export default function CreateProjectPage() {
     setGeneratedFiles([]);
     setGenerationComplete(null);
 
+    // Extract place_id: prefer searchResult, fallback to crawled_data nested path
+    const placeId =
+      searchResult?.place_id ||
+      (data as Record<string, unknown> & { place_metadata?: { place_id?: string } })?.place_metadata?.place_id ||
+      undefined;
+
     // Prepare payload
     const businessProfile = {
       session_id: sessionId,
       gmaps_url: mapsUrl.trim() || undefined,
+      place_id: placeId,
       crawled_data: data,
       crawled_at: new Date().toISOString(),
     };
@@ -203,6 +211,7 @@ export default function CreateProjectPage() {
 
       if (response.ok && result?.success && result?.data) {
         setSearchResult(result.data);
+        setSearchResultRaw(result.data as unknown as Record<string, unknown>);
         setStep('verify_search');
       } else {
         const msg = result?.error?.message || 'Could not find business with those details.';
@@ -222,6 +231,7 @@ export default function CreateProjectPage() {
       business_name?: string;
       address?: string;
       place_id?: string;
+      restaurant_data?: Record<string, unknown>;
     },
   ) => {
     setStep('crawling');
@@ -284,10 +294,12 @@ export default function CreateProjectPage() {
     }
 
     // Send verified data directly - preferred method over URL construction
+    // Pass full search response as restaurant_data so crawler skips its internal SerpAPI call
     await executeCrawl({
       business_name: searchResult.name,
       address: searchResult.address,
       place_id: searchResult.place_id,
+      restaurant_data: searchResultRaw || undefined,
     });
   };
 

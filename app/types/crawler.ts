@@ -21,6 +21,7 @@ export interface CrawlRequest {
   address?: string;
   website_url?: string;
   place_id?: string;
+  restaurant_data?: Record<string, unknown>; // Full /search-restaurant response to skip crawler's internal SerpAPI call
 }
 
 export interface CrawlResponse {

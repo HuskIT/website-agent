@@ -60,7 +60,8 @@
       "mcp__nia__nia_grep",
       "Bash(unzip:*)",
       "Bash(bd:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
