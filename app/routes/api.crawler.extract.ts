@@ -167,8 +167,10 @@ export async function action({ request }: ActionFunctionArgs) {
     // Call crawler API
     const startTime = Date.now();
 
-    // Pass the already parsed payload which matches the expected type
-    // restaurant_data is forwarded so the crawler can skip its internal SerpAPI search
+    /*
+     * Pass the already parsed payload which matches the expected type
+     * restaurant_data is forwarded so the crawler can skip its internal SerpAPI search
+     */
     const result = await extractBusinessData({
       session_id: sessionId,
       google_maps_url: googleMapsUrl,

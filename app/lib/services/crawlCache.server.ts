@@ -36,6 +36,7 @@ export async function lookupCrawlCache(placeId: string, currentUserId: string): 
 
     const ttlCutoff = new Date();
     ttlCutoff.setDate(ttlCutoff.getDate() - TTL_DAYS);
+
     const cutoffIso = ttlCutoff.toISOString();
 
     // Query 1: Top-level place_id (fast, indexed via btree)

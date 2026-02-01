@@ -293,8 +293,10 @@ export default function CreateProjectPage() {
       return;
     }
 
-    // Send verified data directly - preferred method over URL construction
-    // Pass full search response as restaurant_data so crawler skips its internal SerpAPI call
+    /*
+     * Send verified data directly - preferred method over URL construction
+     * Pass full search response as restaurant_data so crawler skips its internal SerpAPI call
+     */
     await executeCrawl({
       business_name: searchResult.name,
       address: searchResult.address,
