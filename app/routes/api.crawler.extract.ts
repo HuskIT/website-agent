@@ -320,11 +320,12 @@ export async function action({ request }: ActionFunctionArgs) {
       websiteSkipReason,
     });
 
-    // Return markdown-only response (without crawler JSON)
+    // Return response with both markdown AND business data for backward compatibility
     return json(
       {
         success: true,
         session_id: sessionId,
+        data: result.data, // Keep for CreateProjectDialog.tsx
         google_maps_markdown: googleMapsMarkdown,
         website_markdown: websiteMarkdown,
         has_website: !!crawledWebsiteUrl,
