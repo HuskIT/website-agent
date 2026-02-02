@@ -568,6 +568,662 @@ A snapshot captures the **complete state** of a project at a specific point in t
 
 ---
 
+## Loading Historical Messages and Files
+
+### Overview
+
+When a user navigates to an existing chat (e.g., `/chat/:id`), the system loads both the conversation history and the project files through a sophisticated multi-stage process. This ensures the chat screen displays the full context with minimal loading time.
+
+**Implementation:** `app/lib/persistence/useChatHistory.ts` (Lines 88-455)
+
+---
+
+### Initial Load Flow
+
+```
+User navigates to /chat/:id or /chat/project-url-slug
+   ↓
+useChatHistory hook initializes
+   ↓
+loadMessages() async function runs
+   ↓
+┌──────────────────────────────────────┐
+│  STAGE 1: Reset State                │
+│  - Clear previous chat data          │
+│  - Reset loading state               │
+│  - Invalidate stale data             │
+└──────────────────────────────────────┘
+   ↓
+┌──────────────────────────────────────┐
+│  STAGE 2: Load from Storage          │
+│  - Try Server (if authenticated)     │
+│  - Fallback to IndexedDB             │
+│  - Load messages + snapshot          │
+└──────────────────────────────────────┘
+   ↓
+┌──────────────────────────────────────┐
+│  STAGE 3: Process & Sort             │
+│  - Sort by sequence_num              │
+│  - Find snapshot index               │
+│  - Determine message range           │
+└──────────────────────────────────────┘
+   ↓
+┌──────────────────────────────────────┐
+│  STAGE 4: Restore Snapshot           │
+│  - Create synthetic message          │
+│  - Restore files to WebContainer     │
+│  - Skip archived messages            │
+└──────────────────────────────────────┘
+   ↓
+Chat UI displays with full context
+```
+
+---
+
+### Stage 1: State Reset (Lines 92-104)
+
+**Purpose:** Prevent stale data from previous chats
+
+```typescript
+// Reset ALL state before loading
+setReady(false);
+setInitialMessages([]);
+setArchivedMessages([]);
+setUrlId(undefined);
+loadedIdRef.current = undefined; // Invalidate immediately
+
+// Reset loading state
+setLoadingState(initialLoadingState);
+setTotalServerMessages(null);
+setLoadedServerMessages(0);
+```
+
+**Why This Matters:**
+- Users may navigate between multiple chats rapidly
+- Prevents showing messages from Chat A while loading Chat B
+- `loadedIdRef` tracks which chat the current data belongs to
+
+---
+
+### Stage 2: Storage Loading (Lines 113-251)
+
+#### Server Storage (Primary - Lines 113-183)
+
+**Conditions:**
+- `projectId` is provided
+- User is authenticated (`isUserAuthenticated()`)
+
+**Process:**
+```typescript
+// Update UI to show loading from server
+setLoadingState({ phase: 'server', loaded: 0, total: null });
+
+// Load messages with pagination progress tracking
+const onProgress = (progress) => {
+  setLoadedServerMessages(progress.loaded);
+  setTotalServerMessages(progress.total);
+};
+
+// Parallel loading for speed
+const [serverMessages, serverSnapshot] = await Promise.all([
+  getServerMessages(projectId, onProgress),
+  getServerSnapshot(projectId)
+]);
+```
+
+**Pagination Details:**
+- Default page size: 50 messages (`MESSAGE_PAGE_SIZE`)
+- Maximum pages: 20 (`MAX_MESSAGE_PAGES` = 1000 messages)
+- Progress callback updates UI in real-time
+- Rate limiting detection shows partial load state
+
+**Server as Source of Truth:**
+```typescript
+// When server load succeeds, skip IndexedDB merge
+// This prevents stale local data from overriding fresh server data
+serverLoadAttempted = true;
+logger.info('Loaded from server', { messageCount: messages.length });
+```
+
+---
+
+#### IndexedDB Fallback (Lines 184-251)
+
+**Triggers When:**
+- Server request fails (offline, network error)
+- User is not authenticated
+- `projectId` not provided (local-only chat)
+
+**Process:**
+```typescript
+// Fall back to client storage
+setLoadingState({ phase: 'local', isPartial: true });
+
+const [clientMessages, clientSnapshot] = await Promise.all([
+  getMessages(db, mixedId),
+  getSnapshot(db, mixedId)
+]);
+
+// Show warning to user
+toast.warning('Loaded from local cache - server unavailable');
+```
+
+**Important:** If server load succeeded (even with 0 messages), IndexedDB is **NOT** consulted. This prevents merge conflicts.
+
+---
+
+### Stage 3: Message Processing (Lines 254-289)
+
+#### Message Sorting
+
+**Critical:** Messages must be sorted by `sequence_num` (server-allocated ordering)
+
+```typescript
+// Server messages may arrive out of order due to pagination
+const sortedMessages = sortMessagesBySequence(storedMessages.messages);
+storedMessages.messages = sortedMessages;
+```
+
+**Why Sorting Matters:**
+- Pagination loads newest messages first
+- Older messages loaded on-demand may be inserted
+- `sequence_num` ensures chronological order
+
+---
+
+#### Snapshot Index Detection (Lines 269-289)
+
+**Purpose:** Determine which messages to show vs. archive
+
+```typescript
+const validSnapshot = snapshot || { chatIndex: '', files: {} };
+const snapshotIndex = storedMessages.messages.findIndex(
+  (m) => m.id === validSnapshot.chatIndex
+);
+
+let startingIdx = -1;
+
+if (snapshotIndex >= 0 && snapshotIndex < endingIdx) {
+  startingIdx = snapshotIndex; // Start from snapshot point
+}
+
+// Messages before snapshot → archived (not shown initially)
+const archivedMessages = storedMessages.messages.slice(0, startingIdx + 1);
+
+// Messages after snapshot → shown in chat
+const filteredMessages = storedMessages.messages.slice(startingIdx + 1, endingIdx);
+```
+
+**Optimization:**
+- Messages before the snapshot are archived
+- User doesn't need to replay entire conversation
+- Files are restored directly from snapshot
+- Can load full history via "Load older messages"
+
+---
+
+### Stage 4: Snapshot Restoration (Lines 293-367)
+
+#### Creating the Restoration Message (Lines 311-362)
+
+**When:** `startingIdx > 0` (snapshot exists and was found)
+
+**Process:**
+
+```typescript
+// 1. Detect project commands (npm install, etc.)
+const projectCommands = await detectProjectCommands(files);
+const commandActionsString = createCommandActionsString(projectCommands);
+
+// 2. Create synthetic restoration message
+filteredMessages = [
+  {
+    id: generateId(),
+    role: 'user',
+    content: 'Restore project from snapshot',
+    annotations: ['no-store', 'hidden'] // Not saved or shown
+  },
+  {
+    id: storedMessages.messages[snapshotIndex].id,
+    role: 'assistant',
+    content: `Bolt Restored your chat from a snapshot. You can revert this message to load the full chat history.
+      <boltArtifact id="restored-project-setup" title="Restored Project & Setup" type="bundled">
+        ${/* File actions for each file in snapshot */}
+        <boltAction type="file" filePath="src/App.tsx">
+          [file content]
+        </boltAction>
+        ${/* Shell commands for project setup */}
+        ${commandActionsString}
+      </boltArtifact>
+    `,
+    annotations: [
+      'no-store', // Don't save this synthetic message
+      { type: 'chatSummary', summary: '...' } // Optional summary
+    ]
+  },
+  ...filteredMessages // Actual messages after snapshot
+];
+```
+
+**Key Features:**
+- **Banner text:** "Bolt Restored your chat from a snapshot..."
+- **Bundled artifact:** All files in one `<boltArtifact>` tag
+- **File actions:** Each file becomes `<boltAction type="file">`
+- **Commands:** Auto-detected setup commands included
+- **No-store annotation:** Won't be saved back to database
+- **Revertable:** User can revert to see full history
+
+---
+
+#### File Restoration to WebContainer (Lines 364-367, 614-688)
+
+**Trigger:**
+```typescript
+if (mixedId && !snapshotRestored) {
+  await restoreSnapshot(mixedId, snapshot);
+  snapshotRestored = true;
+}
+```
+
+**The `restoreSnapshot()` Function:**
+
+```typescript
+async function restoreSnapshot(id: string, snapshot?: Snapshot) {
+  const validSnapshot = snapshot || { chatIndex: '', files: {} };
+
+  if (!validSnapshot?.files || Object.keys(validSnapshot.files).length === 0) {
+    return; // No files to restore
+  }
+
+  // Helper: normalize paths (remove /home/project prefix)
+  const stripWorkDirPrefix = (path: string): string => {
+    if (path.startsWith(WORK_DIR + '/')) {
+      return path.slice(WORK_DIR.length + 1);
+    }
+    return path;
+  };
+
+  const entries = Object.entries(validSnapshot.files);
+
+  // STEP 1: Create folders (sorted by depth to ensure parents first)
+  const folders = entries
+    .filter(([, value]) => value?.type === 'folder')
+    .sort(([a], [b]) => a.length - b.length);
+
+  for (const [folderPath] of folders) {
+    const normalizedPath = stripWorkDirPrefix(folderPath);
+    if (!normalizedPath) continue;
+
+    try {
+      await workbenchStore.createFolder(normalizedPath);
+    } catch {
+      // Folder might already exist, ignore
+    }
+  }
+
+  // STEP 2: Create files
+  const files = entries.filter(([, value]) => value?.type === 'file');
+
+  for (const [filePath, value] of files) {
+    if (value?.type === 'file') {
+      const normalizedPath = stripWorkDirPrefix(filePath);
+      if (!normalizedPath) continue;
+
+      try {
+        await workbenchStore.createFile(normalizedPath, value.content);
+      } catch (error) {
+        logger.error('Failed to create file', { filePath, error });
+      }
+    }
+  }
+
+  logger.info('Snapshot restoration complete', {
+    foldersCreated: folders.length,
+    filesCreated: files.length
+  });
+
+  // Show workbench if files were restored
+  if (files.length > 0) {
+    workbenchStore.setShowWorkbench(true);
+  }
+}
+```
+
+**Restoration Flow:**
+1. **Validate snapshot** - ensure files exist
+2. **Normalize paths** - remove `/home/project` prefix
+3. **Create folders first** - sorted by depth (parents before children)
+4. **Create files second** - write to WebContainer via `workbenchStore.createFile()`
+5. **Show workbench** - make editor visible if files were restored
+
+**Result:**
+- All files written to WebContainer virtual filesystem
+- Nanostores (`filesStore`) updated reactively
+- Editor displays files immediately
+- File tree shows complete structure
+- Preview can start dev server
+
+---
+
+#### Alternative Snapshot Scenarios
+
+**Scenario 1: Snapshot without chatIndex match (Lines 374-386)**
+
+```typescript
+// If snapshot has files but chatIndex not found in messages
+if (snapshot?.files && Object.keys(snapshot.files).length > 0
+    && startingIdx <= 0 && !snapshotRestored) {
+
+  logger.info('Restoring snapshot without chatIndex match', {
+    filesCount: Object.keys(snapshot.files).length
+  });
+
+  await restoreSnapshot(idToRestore, snapshot);
+  snapshotRestored = true;
+}
+```
+
+**Use Case:** Snapshot exists but message history doesn't include the snapshot point
+
+---
+
+**Scenario 2: Project with no messages but has snapshot (Lines 403-416)**
+
+```typescript
+// New project or local chat without messages
+if (projectId || mixedId) {
+  setInitialMessages([]); // Empty chat
+  chatId.set(mixedId || projectId);
+
+  // Still restore files from snapshot
+  if (snapshot?.files && Object.keys(snapshot.files).length > 0) {
+    logger.info('Restoring snapshot for project with no messages');
+    await restoreSnapshot(idToRestore, snapshot);
+  }
+}
+```
+
+**Use Case:** Newly generated projects, projects created via API, or generation failures
+
+---
+
+### Loading Older Messages (Pagination)
+
+**Implementation:** `loadOlderMessages()` function (Lines 705-771)
+
+**Triggers:**
+- User scrolls to top of chat
+- Clicks "Load older messages" button
+- Shown when `hasOlderMessages === true`
+
+**Process:**
+
+```typescript
+async function loadOlderMessages() {
+  // Guardrails
+  if (!projectId || !isUserAuthenticated()) return;
+  if (loadingOlder) return; // Prevent duplicate requests
+
+  // Check pagination limit (max 20 pages = 1000 messages)
+  const currentPages = Math.ceil(loadedServerMessages / MESSAGE_PAGE_SIZE);
+  if (currentPages >= MAX_MESSAGE_PAGES) {
+    toast.info('Maximum messages loaded (1000)');
+    return;
+  }
+
+  const offset = loadedServerMessages; // Load from where we left off
+
+  setLoadingOlder(true);
+
+  try {
+    const { messages, total } = await getServerMessagesPage(
+      projectId,
+      offset,
+      MESSAGE_PAGE_SIZE
+    );
+
+    if (messages.length === 0) {
+      setTotalServerMessages(total);
+      return; // No more messages
+    }
+
+    // Sort and prepend to existing messages
+    const normalizedMessages = sortMessagesBySequence(messages);
+    setInitialMessages(prev => [...normalizedMessages, ...prev]);
+    setLoadedServerMessages(prev => prev + normalizedMessages.length);
+    setTotalServerMessages(total);
+
+    // Persist to IndexedDB for offline access
+    if (db) {
+      const allMessages = [...archivedMessages, ...normalizedMessages, ...initialMessages];
+      await setMessages(db, persistedId, allMessages, ...);
+    }
+
+  } catch (error) {
+    setLoadingOlderError(error.message);
+    throw error;
+  } finally {
+    setLoadingOlder(false);
+  }
+}
+```
+
+**Key Features:**
+- **Pagination:** Loads 50 messages at a time
+- **Limit:** Max 1000 messages (performance constraint)
+- **Prepends:** New messages added to beginning of array
+- **Persists:** Updates IndexedDB with expanded history
+- **Progress:** Shows loading spinner while fetching
+
+**UI Indicators:**
+- `hasOlderMessages`: `totalServerMessages > loadedServerMessages`
+- `loadingOlder`: Shows spinner
+- `loadingOlderError`: Shows error message with retry option
+
+---
+
+### Loading States and Progress Tracking
+
+**State Type:** `MessageLoadingState` (from `~/types/message-loading.ts`)
+
+```typescript
+interface MessageLoadingState {
+  phase: 'idle' | 'server' | 'local' | 'partial' | 'complete' | 'error';
+  loaded: number;        // Messages loaded so far
+  total: number | null;  // Total messages (if known)
+  error: string | null;  // Error message
+  isPartial: boolean;    // Partial load (rate limited, offline)
+  retryCount: number;    // Failed retry attempts
+  lastRetryAt: string | null; // Timestamp of last retry
+}
+```
+
+**Phase Transitions:**
+
+```
+idle → server → complete  (successful server load)
+idle → server → error     (server failure)
+idle → server → local → complete  (fallback to IndexedDB)
+idle → server → partial → complete (rate limited pagination)
+```
+
+**Progress Callback (Lines 127-147):**
+
+```typescript
+const onProgress = (progress: MessageLoadProgress) => {
+  logger.info('Loading messages progress:', {
+    loaded: progress.loaded,
+    total: progress.total,
+    page: progress.page,
+    isComplete: progress.isComplete,
+    isRateLimited: progress.isRateLimited
+  });
+
+  setLoadedServerMessages(progress.loaded);
+  setTotalServerMessages(progress.total);
+
+  setLoadingState(prev => ({
+    ...prev,
+    phase: progress.isRateLimited ? 'partial' : 'server',
+    loaded: progress.loaded,
+    total: progress.total,
+    isPartial: !progress.isComplete && progress.loaded > 0
+  }));
+};
+```
+
+**UI Displays:**
+- **"Loading from server..."** - `phase === 'server'`
+- **"Loaded X of Y messages"** - Shows progress bar
+- **"Loaded from local cache"** - `phase === 'local'` with warning
+- **"Partial load (rate limited)"** - `isPartial === true`
+- **"Failed to load"** - `phase === 'error'` with retry button
+
+---
+
+### Data Staleness Prevention
+
+**Problem:** User navigates from Chat A → Chat B → Chat A rapidly
+
+**Solution:** Track which ID the current data belongs to
+
+```typescript
+// Track which chat this data is for
+const loadedIdRef = useRef<string | undefined>(undefined);
+
+// Reset immediately when starting new load
+loadedIdRef.current = undefined; // Invalidate
+
+// ... load data ...
+
+// Mark which ID this data belongs to
+loadedIdRef.current = mixedId || projectId;
+
+// Only show UI when data matches current chat
+const currentId = mixedId || projectId;
+const isDataForCurrentId = loadedIdRef.current === currentId;
+
+return {
+  ready: ready && isDataForCurrentId,
+  initialMessages,
+  // ...
+};
+```
+
+**Result:** UI only renders when data matches the current route
+
+---
+
+### Complete Load Timeline
+
+```
+T+0ms:   User clicks chat link
+T+50ms:  useChatHistory initializes, state reset
+T+100ms: Loading state → 'server'
+T+150ms: API request sent (GET /api/projects/:id/messages/recent)
+T+200ms: API request sent (GET /api/projects/:id/snapshot)
+T+500ms: Messages received (50 messages, page 1)
+T+550ms: Snapshot received (FileMap with 20 files)
+T+600ms: Messages sorted by sequence_num
+T+650ms: Snapshot index found (message #35)
+T+700ms: Archived messages: 0-35, Displayed messages: 36-50
+T+750ms: Synthetic restoration message created
+T+800ms: restoreSnapshot() begins
+T+850ms: 5 folders created in WebContainer
+T+900ms: 20 files written to WebContainer
+T+950ms: Nanostores updated, UI reactive update
+T+1000ms: Editor displays files, file tree renders
+T+1050ms: Workbench shown, preview iframe initialized
+T+1100ms: Loading state → 'complete'
+T+1150ms: "Bolt Restored your chat from a snapshot" banner visible
+T+1200ms: User can interact with chat and files
+```
+
+**Performance Targets:**
+- Initial load: <1.5s (server-side)
+- Snapshot restoration: <500ms (20 files)
+- Older messages load: <800ms (pagination)
+
+---
+
+### Error Handling
+
+**Server Load Failure:**
+```typescript
+catch (error) {
+  logger.warn('Server load failed, falling back to IndexedDB');
+  setLoadingState({ phase: 'local', isPartial: true });
+
+  // Try IndexedDB
+  const [clientMessages, clientSnapshot] = await Promise.all([
+    getMessages(db, mixedId),
+    getSnapshot(db, mixedId)
+  ]);
+
+  toast.warning('Loaded from local cache - server unavailable');
+}
+```
+
+**IndexedDB Failure:**
+```typescript
+catch (localError) {
+  logger.error('Failed to load from client storage');
+  setLoadingState({
+    phase: 'error',
+    error: String(localError)
+  });
+  toast.error('Failed to load chat: ' + localError.message);
+}
+```
+
+**Snapshot Restoration Failure:**
+```typescript
+catch (error) {
+  logger.error('Failed to create file from snapshot', { filePath, error });
+  // Continue with other files (partial restoration)
+}
+```
+
+---
+
+### Best Practices for Loading
+
+1. **Always check authentication before server requests**
+   ```typescript
+   if (projectId && isUserAuthenticated()) {
+     await getServerMessages(projectId);
+   }
+   ```
+
+2. **Sort messages by sequence_num immediately after loading**
+   ```typescript
+   const sortedMessages = sortMessagesBySequence(serverMessages);
+   ```
+
+3. **Track snapshot restoration to prevent duplicates**
+   ```typescript
+   let snapshotRestored = false;
+   if (!snapshotRestored) {
+     await restoreSnapshot(id, snapshot);
+     snapshotRestored = true;
+   }
+   ```
+
+4. **Provide loading feedback to users**
+   ```typescript
+   setLoadingState({ phase: 'server', loaded: 0, total: null });
+   // Update during pagination
+   onProgress(progress);
+   ```
+
+5. **Validate data belongs to current chat**
+   ```typescript
+   const isDataForCurrentId = loadedIdRef.current === currentId;
+   return { ready: ready && isDataForCurrentId };
+   ```
+
+---
+
 ## Synchronization Strategies
 
 ### Priority Order
