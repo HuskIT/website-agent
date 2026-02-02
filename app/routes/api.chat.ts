@@ -20,6 +20,7 @@ import { createInfoCollectionTools, retrievePendingGenerationResult } from '~/li
 import { INFO_COLLECTION_SYSTEM_PROMPT } from '~/lib/prompts/infoCollectionPrompt';
 import { infoCollectionService } from '~/lib/services/infoCollectionService.server';
 import { PROVIDER_LIST } from '~/utils/constants';
+import { createTrace, createGeneration, flushTraces, isLangfuseEnabled } from '~/lib/.server/telemetry/langfuse.server';
 
 export async function action(args: ActionFunctionArgs) {
   // Require authentication for chat API
@@ -197,6 +198,32 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
     parseCookies(cookieHeader || '').providers || '{}',
   );
 
+  // Create Langfuse trace for observability
+  const env = context.cloudflare?.env;
+  const chatId = messages[messages.length - 1]?.id || 'unknown';
+  const lastUserMessage = messages.filter((m) => m.role === 'user').slice(-1)[0];
+  const userMessageContent = (() => {
+    if (typeof lastUserMessage?.content === 'string') {
+      return lastUserMessage.content;
+    }
+
+    if (Array.isArray(lastUserMessage?.content)) {
+      return (
+        (lastUserMessage.content as Array<{ type: string; text?: string }>).find((item) => item.type === 'text')
+          ?.text || ''
+      );
+    }
+
+    return '';
+  })();
+  const traceContext = createTrace(env, {
+    name: 'chat-request',
+    userId: session?.user?.id,
+    sessionId: chatId,
+    metadata: { chatMode, restaurantThemeId, contextOptimization },
+    input: { userMessage: userMessageContent.slice(0, 2000) },
+  });
+
   const stream = new SwitchableStream();
 
   const cumulativeUsage = {
@@ -315,6 +342,20 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
           // Create a summary of the chat
           console.log(`Messages count: ${processedMessages.length}`);
 
+          // Create Langfuse generation for summary
+          const summaryInputMessages = processedMessages.slice(-5).map((m) => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content.slice(0, 500) : '[complex content]',
+          }));
+          const summaryGeneration = traceContext
+            ? createGeneration(env, traceContext, {
+                name: 'create-summary',
+                model: 'default',
+                input: { messageCount: processedMessages.length, recentMessages: summaryInputMessages },
+              })
+            : null;
+          const summaryStartTime = performance.now();
+
           summary = await createSummary({
             messages: [...processedMessages],
             env: context.cloudflare?.env,
@@ -328,6 +369,15 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
                 cumulativeUsage.completionTokens += resp.usage.completionTokens || 0;
                 cumulativeUsage.promptTokens += resp.usage.promptTokens || 0;
                 cumulativeUsage.totalTokens += resp.usage.totalTokens || 0;
+
+                // End Langfuse generation with usage data
+                summaryGeneration?.end({
+                  promptTokens: resp.usage.promptTokens,
+                  completionTokens: resp.usage.completionTokens,
+                  totalTokens: resp.usage.totalTokens,
+                  latencyMs: performance.now() - summaryStartTime,
+                  output: resp.text?.slice(0, 1000),
+                });
               }
             },
           });
@@ -401,6 +451,17 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
         }
 
         const hasTools = Object.keys(allTools).length > 0;
+
+        // Create Langfuse generation for main streamText
+        const mainGeneration = traceContext
+          ? createGeneration(env, traceContext, {
+              name: 'stream-text-main',
+              model: extractedModel || 'unknown',
+              input: { userMessage: userMessageContent.slice(0, 2000) },
+            })
+          : null;
+        const mainStartTime = performance.now();
+
         const options: StreamingOptions = {
           supabaseConnection: supabase,
           ...(hasTools ? { toolChoice: 'auto' as const, tools: allTools } : {}),
@@ -498,6 +559,17 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
               cumulativeUsage.promptTokens += usage.promptTokens || 0;
               cumulativeUsage.totalTokens += usage.totalTokens || 0;
             }
+
+            // End Langfuse generation with usage data
+            mainGeneration?.end({
+              promptTokens: usage?.promptTokens,
+              completionTokens: usage?.completionTokens,
+              totalTokens: usage?.totalTokens,
+              latencyMs: performance.now() - mainStartTime,
+              output: content?.slice(0, 2000),
+              finishReason,
+              provider: extractedProviderName,
+            });
 
             if (finishReason !== 'length') {
               dataStream.writeMessageAnnotation({
@@ -732,6 +804,11 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
         },
       }),
     );
+
+    // Flush Langfuse traces before response ends (non-blocking via waitUntil)
+    if (isLangfuseEnabled(env)) {
+      context.cloudflare?.ctx?.waitUntil(flushTraces(env));
+    }
 
     return new Response(dataStream, {
       status: 200,

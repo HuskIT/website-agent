@@ -12,7 +12,11 @@
 
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/node';
 import { getSession } from '~/lib/auth/session.server';
-import { extractBusinessData } from '~/lib/services/crawlerClient.server';
+import {
+  extractBusinessData,
+  generateGoogleMapsMarkdown,
+  crawlWebsiteMarkdown,
+} from '~/lib/services/crawlerClient.server';
 import type { CrawlRequest } from '~/types/crawler';
 import { logger } from '~/utils/logger';
 
@@ -134,21 +138,35 @@ export async function action({ request }: ActionFunctionArgs) {
     logger.info(`[API] Calling crawler API`, {
       sessionId,
       crawlerUrl: process.env.CRAWLER_API_URL || 'http://localhost:4999',
-      googleMapsUrl: googleMapsUrl?.substring(0, 50) + '...', // Sanitize URL
+      googleMapsUrl: googleMapsUrl ? googleMapsUrl.substring(0, 50) + '...' : undefined,
     });
 
     // Call crawler API
     const startTime = Date.now();
 
-    // Pass the already parsed payload which matches the expected type
-    const result = await extractBusinessData({
+    /*
+     * Build crawl payload with only ONE crawl method (crawler rejects multiple)
+     * Priority: google_maps_url > place_id+name+address > name+address > website_url
+     * Note: websiteUrl is preserved separately for markdown crawling at line 254
+     */
+    const crawlPayload: CrawlRequest = {
       session_id: sessionId,
-      google_maps_url: googleMapsUrl,
-      business_name: businessName,
-      address,
-      website_url: websiteUrl,
-      place_id: placeId,
-    });
+    };
+
+    if (googleMapsUrl) {
+      crawlPayload.google_maps_url = googleMapsUrl;
+    } else if (placeId && businessName && address) {
+      crawlPayload.place_id = placeId;
+      crawlPayload.business_name = businessName;
+      crawlPayload.address = address;
+    } else if (businessName && address) {
+      crawlPayload.business_name = businessName;
+      crawlPayload.address = address;
+    } else if (websiteUrl) {
+      crawlPayload.website_url = websiteUrl;
+    }
+
+    const result = await extractBusinessData(crawlPayload);
     const duration = Date.now() - startTime;
 
     // Log the extraction attempt
@@ -243,8 +261,77 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Return successful response
-    return json(result, { status: 200 });
+    /*
+     * ─── Generate Markdown in Parallel ─────────────────────────────────
+     * After successful extractBusinessData(), call markdown endpoints
+     */
+    const crawledWebsiteUrl = result.data?.website || websiteUrl;
+
+    const [gmapsMarkdownResult, websiteMarkdownResult] = await Promise.allSettled([
+      generateGoogleMapsMarkdown(sessionId),
+      crawledWebsiteUrl
+        ? crawlWebsiteMarkdown({
+            url: crawledWebsiteUrl,
+            session_id: sessionId,
+            enable_visual_analysis: true,
+          })
+        : Promise.resolve({ success: false, error: 'No website URL' } as const),
+    ]);
+
+    // Extract markdown values
+    const googleMapsMarkdown =
+      gmapsMarkdownResult.status === 'fulfilled' && gmapsMarkdownResult.value.success
+        ? gmapsMarkdownResult.value.markdown
+        : undefined;
+
+    const websiteMarkdown =
+      websiteMarkdownResult.status === 'fulfilled' &&
+      websiteMarkdownResult.value.success &&
+      'data' in websiteMarkdownResult.value
+        ? websiteMarkdownResult.value.data?.markdown
+        : undefined;
+
+    // Log results with graceful degradation messaging
+    const websiteSkipReason = !crawledWebsiteUrl
+      ? 'no_website_url'
+      : websiteMarkdownResult.status === 'rejected'
+        ? 'promise_rejected'
+        : !websiteMarkdownResult.value.success
+          ? websiteMarkdownResult.value.error
+          : undefined;
+
+    if (!websiteMarkdown && crawledWebsiteUrl) {
+      // Website crawl was attempted but failed - log warning (graceful degradation)
+      logger.warn(`[API] Website markdown skipped - proceeding with Google Maps data only`, {
+        sessionId,
+        websiteUrl: crawledWebsiteUrl,
+        reason: websiteSkipReason,
+      });
+    } else if (!crawledWebsiteUrl) {
+      // No website URL available - this is expected for some restaurants
+      logger.info(`[API] No website URL - generating from Google Maps data only`, { sessionId });
+    }
+
+    logger.info(`[API] Markdown generation complete`, {
+      sessionId,
+      hasGoogleMapsMarkdown: !!googleMapsMarkdown,
+      hasWebsiteMarkdown: !!websiteMarkdown,
+      websiteSkipped: !websiteMarkdown,
+      websiteSkipReason,
+    });
+
+    // Return response with both markdown AND business data for backward compatibility
+    return json(
+      {
+        success: true,
+        session_id: sessionId,
+        data: result.data, // Keep for CreateProjectDialog.tsx
+        google_maps_markdown: googleMapsMarkdown,
+        website_markdown: websiteMarkdown,
+        has_website: !!crawledWebsiteUrl,
+      },
+      { status: 200 },
+    );
   } catch (error) {
     // Handle unexpected errors
     logger.error(`[API] Crawler extraction error`, {
