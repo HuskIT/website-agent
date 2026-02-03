@@ -17,6 +17,8 @@
 9. [API Route Reference](#9-api-route-reference)
 10. [Key Data Structures](#10-key-data-structures)
 11. [Error Handling](#11-error-handling)
+12. [Observability (Langfuse)](#12-observability-langfuse)
+13. [LLM Intelligence Pipeline](#13-llm-intelligence-pipeline)
 
 ---
 
@@ -54,13 +56,15 @@ WEBSITE GENERATION (POST /api/project/generate) [SSE stream]
   |       --> TemplateSelection { themeId, name, reasoning }
   |
   +-- Phase 2: CONTENT GENERATION (user's LLM)
-  |     fetchTemplateFromGitHub() --> applyIgnorePatterns()
+  |     resolveTemplate() --> zip-first, GitHub fallback
+  |     --> applyIgnorePatterns()
   |     --> buildTemplatePrimingMessages()
   |     --> composeContentPrompt()
-  |           --> formatBusinessDataForPrompt()
-  |           --> formatMenuForPrompt(), formatReviewsForPrompt()
-  |           --> formatPhotosForPrompt(), formatColorPaletteForPrompt()
-  |           --> formatTypographyForPrompt()
+  |           --> (markdown path) inject google_maps_markdown + website_markdown
+  |           --> (legacy path) formatBusinessDataForPrompt()
+  |               --> formatMenuForPrompt(), formatReviewsForPrompt()
+  |               --> formatPhotosForPrompt(), formatColorPaletteForPrompt()
+  |               --> formatTypographyForPrompt()
   |     --> streamText() with theme prompt injection
   |     --> extractFileActionsFromBuffer() --> yield GeneratedFile[]
   |           --> normalizeFilePath(), cleanBoltFileContent()
@@ -156,7 +160,8 @@ crawling (automatic, shows progress indicators)
 building (project creation + generation)
   |
   +--> handleAutoBuild(crawledData)
-  |      1. Build businessProfile { session_id, gmaps_url, crawled_data, crawled_at }
+  |      1. Build businessProfile { session_id, gmaps_url, crawled_data, crawled_at,
+  |           google_maps_markdown?, website_markdown? }
   |      2. createProject(payload)  -->  POST /api/projects
   |      3. setCreatedProject(project) --> triggers generation useEffect
   |
@@ -187,20 +192,22 @@ POST /api/projects
     session_id,
     gmaps_url: mapsUrl || undefined,
     crawled_data: BusinessData,          // raw from crawler
-    crawled_at: ISO timestamp
+    crawled_at: ISO timestamp,
+    google_maps_markdown?: string,       // LLM-processed markdown (from PR #30)
+    website_markdown?: string            // Website analysis (from PR #30)
   }
 }
 ```
 
 The `business_profile` is stored as a JSONB column directly on the `projects` table.
 
-**Note:** The `generated_content` field (AI-enhanced content from `/generate-website-content`) is NOT populated during onboarding — only `crawled_data` is set. The generation pipeline works with `crawled_data` alone.
+**Note:** The `generated_content` field (AI-enhanced content from `/generate-website-content`) is NOT populated during onboarding — only `crawled_data` is set. However, `google_maps_markdown` and `website_markdown` are populated during the extract step (PR #30). The generation pipeline prefers markdown data when available, falling back to structured `crawled_data`.
 
 ---
 
 ## 3. Crawler Integration
 
-Four crawler endpoints exist, used at different stages:
+Six crawler endpoints exist, used at different stages:
 
 ### 3.1 Business Search (New — PR #27)
 
@@ -266,10 +273,45 @@ POST /api/crawler/extract
   POST {CRAWLER_API_URL}/crawl  (timeout: 5 min / 300s)
       |
       v
-  Response: CrawlResponse { success, data?: BusinessData }
+  CrawlResponse { success, data?: BusinessData }
     BusinessData:
       { name, address, phone, website, rating,
         reviews_count, hours, reviews[], menu, photos[] }
+      |
+      v
+  ─── Parallel Markdown Generation ──────────────────────
+  After successful /crawl, generate markdown in parallel:
+      |
+      Promise.allSettled([
+        generateGoogleMapsMarkdown(sessionId),
+        crawlWebsiteMarkdown({ url, session_id, enable_visual_analysis: true })
+      ])
+      |
+      v
+  generateGoogleMapsMarkdown(sessionId)
+    POST {CRAWLER_API_URL}/generate-google-maps-markdown  (timeout: 120s)
+    --> GenerateGoogleMapsMarkdownResponse { success, markdown? }
+      |
+  crawlWebsiteMarkdown(request)  (skipped if no website URL)
+    POST {CRAWLER_API_URL}/crawl-website-markdown  (timeout: 120s)
+    --> CrawlWebsiteMarkdownResponse { success, data?: { markdown, session_id, url } }
+      |
+      v
+  Graceful degradation:
+    - Missing website URL: skip, log info
+    - Website crawl fails: proceed with Google Maps data only, log warning
+    - Both fail: generation still proceeds with structured BusinessData
+      |
+      v
+  Combined Response (backward-compatible):
+    {
+      success: true,
+      session_id,
+      data: BusinessData,              // Original structured data
+      google_maps_markdown?: string,   // LLM-processed markdown profile
+      website_markdown?: string,       // Website analysis with visual descriptions
+      has_website: boolean
+    }
 ```
 
 **Generate flow (separate endpoint, called independently):**
@@ -292,7 +334,47 @@ POST /api/crawler/generate
         extractedData }
 ```
 
-### 3.3 Mock Crawler (Fallback)
+### 3.3 Google Maps Markdown Generation (New — PR #30)
+
+**Files:**
+- Client: `app/lib/services/crawlerClient.server.ts` → `generateGoogleMapsMarkdown()`
+- Called from: `app/routes/api.crawler.extract.ts` (parallel with website markdown)
+
+```
+generateGoogleMapsMarkdown(sessionId)
+    |
+    v
+  POST {CRAWLER_API_URL}/generate-google-maps-markdown  (timeout: 120s)
+    { session_id }
+    |
+    v
+  Response: GenerateGoogleMapsMarkdownResponse
+    { success, markdown?: string }
+```
+
+Prerequisites: `extractBusinessData()` must have been called with the same `session_id`. The crawler API caches results per session.
+
+### 3.4 Website Markdown Crawling (New — PR #30)
+
+**Files:**
+- Client: `app/lib/services/crawlerClient.server.ts` → `crawlWebsiteMarkdown()`
+- Called from: `app/routes/api.crawler.extract.ts` (parallel with Google Maps markdown)
+
+```
+crawlWebsiteMarkdown({ url, session_id, max_pages?, enable_visual_analysis? })
+    |
+    v
+  POST {CRAWLER_API_URL}/crawl-website-markdown  (timeout: 120s)
+    { url, session_id, max_pages: 1, enable_visual_analysis: true }
+    |
+    v
+  Response: CrawlWebsiteMarkdownResponse
+    { success, data?: { markdown, session_id, url } }
+```
+
+Uses LLM Vision to describe images, layout, and visual style of the restaurant's existing website. Skipped entirely if no website URL is found in crawler data.
+
+### 3.5 Mock Crawler (Fallback)
 
 **File:** `app/lib/services/crawlerService.ts`
 
@@ -316,7 +398,7 @@ getMockCrawlerData(dataPackage)
   CrawlerOutput (production_master_map schema)
 ```
 
-### 3.4 Internal Places Service (Advanced)
+### 3.6 Internal Places Service (Advanced)
 
 **Files:**
 - Agent: `app/lib/services/crawlerAgent.server.ts`
@@ -357,7 +439,7 @@ executeCrawl(request, authenticatedTenantId)
 
 **Quota management:** Tracks API usage with states: `healthy` | `warning` | `exhausted`.
 
-### 3.5 Info Collection Service
+### 3.7 Info Collection Service
 
 **Files:**
 - Service: `app/lib/services/infoCollectionService.server.ts`
@@ -439,8 +521,9 @@ export default siteContent;
 **Files:**
 - Route: `app/routes/api.project.generate.ts`
 - Service: `app/lib/services/projectGenerationService.ts`
-- Templates: `app/lib/.server/templates/` (index.ts, github-template-fetcher.ts, template-primer.ts)
+- Templates: `app/lib/.server/templates/` (template-resolver.ts, zip-template-fetcher.ts, github-template-fetcher.ts, template-primer.ts)
 - LLM streaming: `app/lib/.server/llm/stream-text.ts`
+- Telemetry: `app/lib/.server/telemetry/langfuse.server.ts`
 - Theme registry: `app/theme-prompts/registry.ts`
 
 ### 5.1 Entry Point
@@ -514,11 +597,22 @@ TemplateSelection { themeId, name, title, reasoning }
 **Function:** `generateContent(businessProfile, themeId, model, provider, env, apiKeys, providerSettings)`
 
 ```
-Step A: Fetch template from GitHub
-  fetchTemplateFromGitHub(githubRepo, githubToken)
+Step A: Resolve template (zip-first, GitHub fallback)
+  resolveTemplate(templateName, { githubRepo, githubToken })
     |
-    +--> Download repo as zipball (GitHub API)
-    +--> Extract files, exclude: .git, lock files, binaries, >100KB
+    +--> Check filesystem available? (cached, false on Cloudflare Workers)
+    |      |
+    |      +--> YES: getZipPath(templateName) --> /templates/{slug}.zip
+    |      |     zipExists(path) --> fetchTemplateFromZip(path)
+    |      |       +--> Extract files, skip binaries, strip root folder
+    |      |       +--> Return ResolvedTemplate { files, source: { type: 'zip' } }
+    |      |
+    |      +--> NO or zip fails: fall through to GitHub
+    |
+    +--> fetchTemplateFromGitHub(githubRepo, githubToken)  [fallback]
+    |      +--> Download repo as zipball (GitHub API)
+    |      +--> Extract files, exclude: .git, lock files, binaries, >100KB
+    |      +--> Return ResolvedTemplate { files, source: { type: 'github' } }
     |
     v
   applyIgnorePatterns(allFiles)
@@ -598,13 +692,15 @@ Input: BusinessProfile | null | undefined
   |
   +--> null/undefined --> { valid: false, errors: ['No business profile data'] }
   |
-  +--> Extract businessName from:
-  |      1. profile.generated_content?.businessIdentity?.displayName  (preferred)
-  |      2. profile.crawled_data?.name                                (fallback)
+  +--> Check data availability:
+  |      hasLegacyData = crawled_data.name OR generated_content.businessIdentity.displayName
+  |      hasMarkdown = !!google_maps_markdown
   |
-  +--> If no business name --> error: 'Business name is required'
+  +--> If neither legacy data NOR markdown:
+  |      --> error: 'Business data is required (crawled_data or google_maps_markdown)'
   |
   +--> Warnings (non-blocking):
+  |      - No website data (neither website_markdown nor crawled_data.website)
   |      - No address
   |      - No phone
   |      - No hours
@@ -697,7 +793,36 @@ Input: BusinessProfile
 
 **Function:** `composeContentPrompt(businessProfile, themePrompt)` → string
 
-This is the main system prompt builder for the content generation LLM. It assembles multiple sub-sections:
+This is the main system prompt builder for the content generation LLM. It has **two paths** depending on whether markdown data is available:
+
+#### Markdown Path (preferred, from PR #30)
+
+When `businessProfile.google_maps_markdown` exists, the prompt uses pre-formatted markdown:
+
+```
+Input: BusinessProfile with google_maps_markdown + optional website_markdown
+  |
+  v
+Output structure:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ <google_maps_data>                                              │
+  │   {businessProfile.google_maps_markdown}                        │
+  │ </google_maps_data>                                             │
+  │                                                                 │
+  │ <existing_website_analysis>        (if website_markdown exists) │
+  │   {businessProfile.website_markdown}                            │
+  │ </existing_website_analysis>                                    │
+  │   Use existing website to match visual style and tone           │
+  │                                                                 │
+  │ Content requirements + task instructions                        │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+**Note:** Theme prompt is NOT included in this path — it's injected separately in `stream-text.ts` via `restaurantThemeId` to avoid duplication.
+
+#### Legacy Path (fallback)
+
+When no markdown is available, falls back to structured formatting:
 
 ```
 Input: BusinessProfile + themePrompt (from .md file)
@@ -1028,7 +1153,7 @@ Client receives annotation:
 | Route | Method | Auth | Purpose | Input | Output |
 |-------|--------|------|---------|-------|--------|
 | `/api/crawler/search` | POST | Required | Search business by name+address | `{ business_name, address }` | `{ success, data: VerifiedRestaurantData }` |
-| `/api/crawler/extract` | POST | Required | Extract business data (multi-method) | `{ session_id, google_maps_url?, business_name?, address?, website_url?, place_id? }` | `{ success, data: BusinessData }` |
+| `/api/crawler/extract` | POST | Required | Extract business data + generate markdown | `{ session_id, google_maps_url?, business_name?, address?, website_url?, place_id? }` | `{ success, data: BusinessData, google_maps_markdown?, website_markdown?, has_website }` |
 | `/api/crawler/generate` | POST | Required | Generate content from crawled data | `{ session_id }` | `{ success, session_id, data: GeneratedContent }` |
 | `/api/info-collection` | GET | Required | List/get info collection sessions | Query: `active`, `status`, or `id` | `InfoCollectionSession[]` or single |
 | `/api/info-collection` | POST | Required | Create info collection session | `{ chatId? }` | `InfoCollectionSession` |
@@ -1105,6 +1230,8 @@ interface BusinessProfile {
   crawled_data?: BusinessData; // Raw extracted data
   generated_content?: GeneratedContent; // AI-enhanced content
   crawled_at?: string;        // ISO timestamp
+  google_maps_markdown?: string;  // LLM-processed markdown profile (from /generate-google-maps-markdown)
+  website_markdown?: string;      // Website analysis with visual descriptions (from /crawl-website-markdown)
 }
 ```
 
@@ -1205,6 +1332,8 @@ BusinessData                      (from /crawl)
 BusinessProfile                   (stored on projects.business_profile JSONB)
   |-- crawled_data: BusinessData      (always present after onboarding)
   |-- generated_content: GeneratedContent  (optional, from /generate-website-content)
+  |-- google_maps_markdown: string    (optional, from /generate-google-maps-markdown)
+  |-- website_markdown: string        (optional, from /crawl-website-markdown)
   |
   v  (consumed by projectGenerationService.ts)
       |
@@ -1236,7 +1365,38 @@ CrawlerOutput                     (from mock crawler / info-collection)
   +--> websiteGenerationService.ts  (transforms via contentTransformer)
 ```
 
-### 10.8 GeneratedFile & FileMap
+### 10.8 Markdown Response Types (from PR #30)
+
+**File:** `app/types/crawler.ts`
+
+```typescript
+interface GenerateGoogleMapsMarkdownResponse {
+  success: boolean;
+  markdown?: string;      // LLM-processed markdown profile
+  error?: string;
+  statusCode?: number;
+}
+
+interface CrawlWebsiteMarkdownRequest {
+  url: string;                     // Website URL to crawl
+  session_id: string;              // Links to prior /crawl
+  max_pages?: number;              // Default: 1 (homepage)
+  enable_visual_analysis?: boolean; // LLM Vision (default: true)
+}
+
+interface CrawlWebsiteMarkdownResponse {
+  success: boolean;
+  data?: {
+    markdown: string;     // Markdown with visual style descriptions
+    session_id: string;
+    url: string;
+  };
+  error?: string;
+  statusCode?: number;
+}
+```
+
+### 10.9 GeneratedFile & FileMap
 
 **File:** `app/types/generation.ts`, `app/lib/stores/files.ts`
 
@@ -1289,7 +1449,8 @@ type FileMap = {
 - Adds `statusCode` to all error responses
 - Parses error body for `error`, `message`, or `detail` fields
 - Wraps network errors with descriptive messages
-- Consistent pattern across `extractBusinessData()`, `generateWebsiteContent()`, `searchRestaurant()`
+- Consistent pattern across `extractBusinessData()`, `generateWebsiteContent()`, `searchRestaurant()`, `generateGoogleMapsMarkdown()`, `crawlWebsiteMarkdown()`
+- Markdown endpoints use shorter timeout (120s vs 300s for crawl)
 
 **Agent level** (`crawlerAgent.server.ts`):
 - Cross-tenant access prevention
@@ -1316,10 +1477,489 @@ type FileMap = {
 |--------------|----------|
 | No `business_profile` on project | Create minimal profile from `project.name` |
 | Template selection LLM fails | Use `classicminimalistv2` (Classic Minimalist) |
+| Local zip template missing | Fall back to GitHub fetch (`template-resolver.ts`) |
 | GitHub template fetch fails | Fall back to from-scratch LLM generation |
 | Snapshot save fails | Generation still completes; error reported in `complete` event |
 | External crawler unavailable | Mock crawler with cuisine detection from description |
 | Search API fails | User falls back to manual Maps URL entry |
+| Google Maps markdown fails | Generation proceeds with structured `BusinessData` (legacy path) |
+| Website markdown fails | Generation proceeds with Google Maps data only (graceful degradation) |
+| No website URL found | Skip website markdown entirely; log info |
+
+---
+
+## 13. LLM Intelligence Pipeline
+
+This section provides a comprehensive overview of how the LLM transforms business data (markdown or structured) into a customized restaurant website. It covers the theme prompt system, prompt composition, data processing, and streamText configuration.
+
+### 13.1 Architecture Overview
+
+```
+BusinessProfile (input)
+  |
+  +--> HAS google_maps_markdown?
+  |      |
+  |      +--> YES (Markdown Path)
+  |      |      composeContentPrompt() returns:
+  |      |        <google_maps_data>{markdown}</google_maps_data>
+  |      |        <existing_website_analysis>{website_markdown}</existing_website_analysis>
+  |      |
+  |      +--> NO (Legacy Path)
+  |             composeContentPrompt() returns:
+  |               THEME DESIGN INSTRUCTIONS: {themePrompt}
+  |               BRAND VOICE: {tone, usp, audience, style}
+  |               COLOR PALETTE: {formatColorPaletteForPrompt()}
+  |               TYPOGRAPHY: {formatTypographyForPrompt()}
+  |               BUSINESS PROFILE: {formatBusinessDataForPrompt()}
+  |                 +--> formatMenuForPrompt()     (4 categories, 6 items each)
+  |                 +--> formatReviewsForPrompt()  (5 top-rated reviews)
+  |                 +--> formatPhotosForPrompt()   (6 image URLs)
+  |               CONTENT REQUIREMENTS: (exact data usage rules)
+  |
+  v
+Template Priming (buildTemplatePrimingMessages)
+  |
+  +--> assistantMessage: <boltArtifact> with all template files
+  +--> userMessage: BUSINESS DATA + CUSTOMIZATION TASK
+  |
+  v
+streamText() Call
+  |
+  +--> System prompt = base prompt (from PromptLibrary)
+  |      + additionalSystemPrompt (composeContentPrompt output)
+  |      + RESTAURANT THEME INSTRUCTIONS (if chatMode='build' && restaurantThemeId)
+  |
+  +--> Messages = [assistantMessage, userMessage]
+  |
+  +--> Model resolution: provider.getModelInstance({ model, apiKeys, ... })
+  +--> Token limits: getCompletionTokenLimit(modelDetails)
+  |
+  v
+LLM Response Stream --> extractFileActionsFromBuffer() --> GeneratedFile[]
+```
+
+### 13.2 Theme Prompt System
+
+**Files:**
+- Registry: `app/theme-prompts/registry.ts`
+- Theme prompts: `app/theme-prompts/*.md` (12 files)
+- Types: `app/types/restaurant-theme.ts`
+
+#### Theme Registry Architecture
+
+```typescript
+// Themes loaded using Vite ?raw suffix at build time
+import IndochineluxePrompt from './Indochineluxe.md?raw';
+
+// Registry array with metadata + prompt content
+export const RESTAURANT_THEMES: RestaurantTheme[] = [
+  {
+    id: 'indochineluxe',
+    label: 'Indochine Luxe',
+    description: 'Luxurious Southeast Asian dining...',
+    cuisines: ['vietnamese', 'french-indochine', 'luxury', ...],
+    styleTags: ['luxurious', 'colonial', 'silk', ...],
+    templateName: 'Indochine Luxe',
+    prompt: IndochineluxePrompt,  // Full .md content as string
+  },
+  // ... 11 more themes
+];
+
+// Lookup functions
+getThemeById(id) → RestaurantTheme | undefined
+getThemeByTemplateName(name) → RestaurantTheme | undefined
+getThemePrompt(id) → string | null  // Returns the .md content
+```
+
+#### Theme Prompt Structure (.md files)
+
+Each theme prompt file follows a consistent structure:
+
+```markdown
+# SYSTEM PROMPT: THE INDOCHINE LUXE (HIGH-END VIETNAMESE)
+
+## 1. ROLE
+You are a **Creative Director and Cultural Architect**...
+
+## 2. OBJECTIVES
+Generate a creative **Design System**, **Component Concepts**, and **Content Strategy**...
+
+## 3. ARCHETYPE: THE INDOCHINE LUXE
+**Concept:** A digital expression of "Modern Heritage."...
+
+### Design Tokens (The "Skin")
+- **Typography:** Display: Cinzel/Playfair Display, Body: Manrope/Inter
+- **Texture:** Lacquer & Brass, Lotus/Lantern patterns
+- **Color:** Jewel Tones - Charcoal (#1C1C1C), Antique Gold (#C5A059)
+- **Imagery:** Moody Chiaroscuro, dramatic shadows
+- **Buttons:** Gold/Brass Outlines, 2px corners
+
+### Generalized Design Principles
+- Visual Hierarchy, Navigation, Accessibility...
+
+## 4. ABSTRACTED COMPONENT LIBRARY
+- Module A: The Cinematic Heritage Hero
+- Module B: The Signature Dish Spotlight
+- Module C: The Ingredient Origin Grid
+- Module D: The Ambience Gallery
+
+## 5. CONTENT GENERATION SCHEMA
+Instructions, Tone, Image Prompts, SEO, Data Structure...
+
+## OUTPUT FORMAT - CRITICAL
+<boltArtifact>/<boltAction> format requirements...
+```
+
+### 13.3 Theme Injection in streamText
+
+**File:** `app/lib/.server/llm/stream-text.ts:190-218`
+
+The theme prompt is injected into the system prompt only when:
+1. `chatMode === 'build'` (not 'discuss')
+2. `restaurantThemeId` is provided (non-null)
+
+```typescript
+// Theme injection logic
+if (chatMode === 'build' && restaurantThemeId) {
+  const themePrompt = getThemePrompt(restaurantThemeId);
+
+  if (themePrompt) {
+    systemPrompt = `${systemPrompt}
+
+---
+RESTAURANT THEME INSTRUCTIONS:
+${themePrompt}
+---
+`;
+  }
+}
+```
+
+**Note:** In the markdown path, theme instructions are NOT included in `composeContentPrompt()` output because they're injected here. This avoids duplication.
+
+### 13.4 Template Priming Mechanism
+
+**File:** `app/lib/.server/templates/template-primer.ts`
+
+Template priming injects the resolved template files into the conversation so the LLM customizes existing code rather than generating from scratch.
+
+#### Message Construction
+
+```
+buildTemplatePrimingMessages(includedFiles, ignoredFiles, businessProfile, templateName, themePrompt, title)
+  |
+  +--> assistantMessage (buildTemplateFilesMessage):
+  |      "Bolt is initializing your project with the {templateName} template."
+  |      <boltArtifact id="imported-files" title="{title}" type="bundled">
+  |        <boltAction type="file" filePath="src/App.tsx">
+  |          {file.content}
+  |        </boltAction>
+  |        <boltAction type="file" filePath="src/data/content.ts">
+  |          {file.content}
+  |        </boltAction>
+  |        ... (all template files)
+  |      </boltArtifact>
+  |
+  +--> userMessage (buildCustomizationMessage):
+         TEMPLATE INSTRUCTIONS:
+           {themePrompt}
+         ---
+         STRICT FILE ACCESS RULES:
+           Read-only files list (from ignoredFiles)
+         ---
+         BUSINESS DATA TO INJECT:
+           {formatBusinessProfileForCustomization(profile)}
+         ---
+         CUSTOMIZATION TASK:
+           Instructions to modify existing files, not generate new boilerplate
+         ---
+         OUTPUT FORMAT - FINAL REMINDER:
+           <boltArtifact>/<boltAction> format requirements
+```
+
+#### Business Data Formatting for Priming
+
+`formatBusinessProfileForCustomization(profile)` outputs:
+
+```
+Business Name: Pho Saigon
+Tagline: Authentic Vietnamese Cuisine
+Description: Family-owned since 1995...
+
+Contact Information:
+  Address: 123 Main St, Los Angeles, CA
+  Phone: (213) 555-1234
+  Website: https://phosaigon.com
+
+Hours of Operation:
+  Monday: 10am-9pm
+  Tuesday: 10am-9pm
+  ...
+
+Menu:
+  Appetizers:
+    - Spring Rolls ($8.99)
+    - Pho Bo ($12.99)
+  Main Course:
+    - Grilled Chicken ($15.99)
+  ... (6 categories max, 6 items each)
+
+Top Reviews:
+  "Best pho in the city!" — John D. (5★)
+  "Great authentic flavors" — Jane S. (4★)
+  ... (3 reviews max)
+
+Brand Tone: Warm and welcoming
+Unique Selling Point: 24-hour slow-cooked broth
+Target Audience: Food enthusiasts and families
+
+Color Palette:
+  Primary: #1A1A2E
+  Secondary: #16213E
+  Accent: #E94560
+```
+
+### 13.5 Image URL Handling
+
+Image URLs from the crawler are passed directly to the LLM without modification. The LLM is instructed to use them in `<img>` tags.
+
+#### Photo Processing Flow
+
+```
+crawled_data.photos[] (from /crawl response)
+  |
+  +--> Photo { url: string, type?: string }
+  |
+  +--> formatPhotosForPrompt() (6 URLs max)
+  |      Output:
+  |      - https://lh3.googleusercontent.com/.../photo1.jpg
+  |      - https://lh3.googleusercontent.com/.../photo2.jpg
+  |      - ...
+  |
+  +--> Injected into prompt:
+         PHOTOS (if provided):
+         - https://lh3.googleusercontent.com/.../photo1.jpg
+         - ...
+
+         Usage instructions (legacy path):
+         "Include these photos in Hero, Gallery, or Menu sections"
+```
+
+**Important:** Photos are typically Google Maps or Google Business Profile URLs (lh3.googleusercontent.com). The LLM places these in:
+- Hero background/gallery
+- Menu item images
+- About section imagery
+- Gallery masonry grids
+
+### 13.6 Text Content Processing
+
+Text content flows through with light normalization:
+
+| Data Field | Source | Processing | Usage in Prompt |
+|------------|--------|------------|-----------------|
+| Business name | `crawled_data.name` or `businessIdentity.displayName` | Trim, fallback to "Restaurant Name" | BASIC INFO: Display Name |
+| Tagline | `businessIdentity.tagline` | Trim | BASIC INFO: Tagline |
+| Description | `businessIdentity.description` | Trim | BASIC INFO: Description |
+| Address | `crawled_data.address` | Trim, fallback to placeholder | CONTACT: Address |
+| Phone | `crawled_data.phone` | Trim, fallback to placeholder | CONTACT: Phone |
+| Hours | `crawled_data.hours` (Record) | Slice to 7 days, format "Day: Value" | HOURS section |
+
+**Defaults tracking:** When data is missing, the prompt includes a "DEFAULTS USED" line so the LLM knows which values are placeholders.
+
+### 13.7 Menu Data Processing
+
+**Function:** `formatMenuForPrompt(menu)` — `projectGenerationService.ts:844-865`
+
+```
+Input: Menu { categories: MenuCategory[] }
+  |
+  +--> Limit: 4 categories max
+  +--> Per category: 6 items max
+  |
+  v
+Output format:
+  - Appetizers
+    - Spring Rolls ($8.99) — Fresh vegetables in rice paper
+    - Pho Bo ($12.99) — Traditional beef noodle soup
+  - Main Course
+    - Grilled Chicken ($15.99)
+```
+
+**Processing rules:**
+- Categories without items are skipped
+- Item format: `{name} ({price}) — {description}`
+- Price and description are optional
+- Empty menu returns "N/A"
+
+### 13.8 Reviews Processing
+
+**Function:** `formatReviewsForPrompt(reviews)` — `projectGenerationService.ts:867-884`
+
+```
+Input: Review[] { author, rating, text, date }
+  |
+  +--> Filter: non-empty text only
+  +--> Sort: rating DESC (highest first)
+  +--> Limit: 5 reviews max
+  |
+  v
+Output format:
+  - "Best pho in the city!" — John D. (5/5)
+  - "Great authentic flavors" — Jane S. (4/5)
+```
+
+**Processing rules:**
+- Reviews without text are excluded
+- Author shown if available
+- Rating shown as X/5 format
+- Empty reviews array returns "N/A"
+
+### 13.9 streamText Configuration
+
+**File:** `app/lib/.server/llm/stream-text.ts`
+
+#### Model Resolution
+
+```
+1. Extract model/provider from last user message
+   extractPropertiesFromMessage(message) → { model, provider, content }
+
+2. Find provider in PROVIDER_LIST
+   PROVIDER_LIST.find(p => p.name === currentProvider)
+
+3. Get model details from static or dynamic models
+   staticModels = LLMManager.getInstance().getStaticModelListFromProvider(provider)
+   modelDetails = staticModels.find(m => m.name === currentModel)
+
+4. If not found, fetch dynamic models
+   modelsList = await LLMManager.getInstance().getModelListFromProvider(provider, { apiKeys, ... })
+```
+
+#### Token Limit Calculation
+
+```typescript
+function getCompletionTokenLimit(modelDetails): number {
+  // Priority 1: Model-specific completion tokens
+  if (modelDetails.maxCompletionTokens > 0) {
+    return modelDetails.maxCompletionTokens;
+  }
+
+  // Priority 2: Provider-specific default
+  const providerDefault = PROVIDER_COMPLETION_LIMITS[modelDetails.provider];
+  if (providerDefault) {
+    return providerDefault;
+  }
+
+  // Priority 3: Fallback (capped at 16384)
+  return Math.min(MAX_TOKENS, 16384);
+}
+```
+
+#### Reasoning Model Handling
+
+For reasoning models (o1, GPT-5), different parameters are used:
+
+```typescript
+const isReasoning = isReasoningModel(modelDetails.name);
+
+// Token parameter varies by model type
+const tokenParams = isReasoning
+  ? { maxCompletionTokens: safeMaxTokens }
+  : { maxTokens: safeMaxTokens };
+
+// Unsupported params filtered for reasoning models
+// (temperature, topP, presencePenalty, frequencyPenalty, logprobs, etc.)
+```
+
+#### Final streamText Call
+
+```typescript
+const streamParams = {
+  model: provider.getModelInstance({
+    model: modelDetails.name,
+    serverEnv,
+    apiKeys,
+    providerSettings,
+  }),
+  system: chatMode === 'build' ? systemPrompt : discussPrompt(),
+  ...tokenParams,  // maxTokens or maxCompletionTokens
+  messages: convertToCoreMessages(processedMessages),
+  ...filteredOptions,
+  ...(isReasoning ? { temperature: 1 } : {}),  // Required for reasoning models
+};
+
+return await _streamText(streamParams);
+```
+
+### 13.10 Complete Data Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        LLM INTELLIGENCE PIPELINE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  BusinessProfile                                                             │
+│  ├── crawled_data (from /crawl)                                              │
+│  │   ├── name, address, phone, website                                       │
+│  │   ├── hours: Record<string, string>                                       │
+│  │   ├── reviews: Review[]                                                   │
+│  │   ├── menu: { categories: MenuCategory[] }                                │
+│  │   └── photos: Photo[]                                                     │
+│  ├── generated_content (from /generate-website-content)                      │
+│  │   ├── brandStrategy: { usp, toneOfVoice, targetAudience, visualStyle }    │
+│  │   ├── visualAssets: { colorPalette, typography, logo }                    │
+│  │   └── businessIdentity: { displayName, tagline, description }             │
+│  ├── google_maps_markdown (from /generate-google-maps-markdown)              │
+│  └── website_markdown (from /crawl-website-markdown)                         │
+│                                                                              │
+│  ════════════════════════════════════════════════════════════════════════    │
+│                                                                              │
+│  PHASE 1: Template Selection                                                 │
+│  ├── analyzeBusinessProfile() → { cuisine, priceTier, style, keywords }      │
+│  ├── buildTemplateSelectionSystemPrompt() → 12 themes as XML                 │
+│  ├── POST /api/llmcall (fast model)                                          │
+│  └── parseTemplateSelection() → { themeId, name, reasoning }                 │
+│                                                                              │
+│  ════════════════════════════════════════════════════════════════════════    │
+│                                                                              │
+│  PHASE 2: Content Generation                                                 │
+│  │                                                                           │
+│  ├── Template Resolution                                                     │
+│  │   └── resolveTemplate() → ResolvedTemplate { files[], source }            │
+│  │                                                                           │
+│  ├── Prompt Composition                                                      │
+│  │   ├── MARKDOWN PATH (if google_maps_markdown exists):                     │
+│  │   │   └── <google_maps_data> + <existing_website_analysis>                │
+│  │   │                                                                       │
+│  │   └── LEGACY PATH (fallback):                                             │
+│  │       ├── Theme prompt (from .md file)                                    │
+│  │       ├── formatColorPaletteForPrompt()                                   │
+│  │       ├── formatTypographyForPrompt()                                     │
+│  │       └── formatBusinessDataForPrompt()                                   │
+│  │           ├── formatMenuForPrompt() → 4 categories × 6 items              │
+│  │           ├── formatReviewsForPrompt() → 5 top reviews                    │
+│  │           └── formatPhotosForPrompt() → 6 image URLs                      │
+│  │                                                                           │
+│  ├── Template Priming                                                        │
+│  │   ├── buildTemplateFilesMessage() → <boltArtifact> with all files         │
+│  │   └── buildCustomizationMessage() → BUSINESS DATA + TASK                  │
+│  │                                                                           │
+│  └── streamText() Call                                                       │
+│      ├── System: base + additionalSystemPrompt + theme (if build mode)       │
+│      ├── Messages: [assistantMessage, userMessage]                           │
+│      ├── Model: provider.getModelInstance(...)                               │
+│      └── Tokens: maxTokens or maxCompletionTokens                            │
+│                                                                              │
+│  ════════════════════════════════════════════════════════════════════════    │
+│                                                                              │
+│  OUTPUT PROCESSING                                                           │
+│  ├── extractFileActionsFromBuffer() → GeneratedFile[]                        │
+│  │   ├── normalizeFilePath() → /home/project/...                             │
+│  │   └── cleanBoltFileContent() → unwrap markdown, unescape XML              │
+│  └── buildFileMapFromGeneratedFiles() → FileMap (last write wins)            │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -1353,11 +1993,20 @@ All key files referenced in this document:
 | Projects DB | `app/lib/services/projects.server.ts` |
 | SSE utilities | `app/lib/services/sseUtils.ts` |
 | Fast model resolver | `app/lib/services/fastModelResolver.ts` |
-| **LLM** | |
+| **LLM & Templates** | |
 | Stream text | `app/lib/.server/llm/stream-text.ts` |
-| Template utils | `app/lib/.server/templates/` (index.ts, github-template-fetcher.ts, template-primer.ts) |
+| LLM constants | `app/lib/.server/llm/constants.ts` |
+| LLM utils | `app/lib/.server/llm/utils.ts` |
+| Template resolver | `app/lib/.server/templates/template-resolver.ts` |
+| Zip template fetcher | `app/lib/.server/templates/zip-template-fetcher.ts` |
+| GitHub template fetcher | `app/lib/.server/templates/github-template-fetcher.ts` |
+| Template primer | `app/lib/.server/templates/template-primer.ts` |
 | Theme registry | `app/theme-prompts/registry.ts` |
 | Theme prompts | `app/theme-prompts/*.md` (12 files) |
+| LLM Manager | `app/lib/modules/llm/manager.ts` |
+| Prompt Library | `app/lib/common/prompt-library.ts` |
+| **Telemetry** | |
+| Langfuse | `app/lib/.server/telemetry/langfuse.server.ts` |
 | **Types** | |
 | Project | `app/types/project.ts` |
 | Crawler | `app/types/crawler.ts` |
@@ -1370,3 +2019,51 @@ All key files referenced in this document:
 | Info collection | `app/lib/stores/infoCollection.ts` |
 | Workbench | `app/lib/stores/workbench.ts` |
 | Files | `app/lib/stores/files.ts` |
+
+---
+
+## 12. Observability (Langfuse)
+
+**File:** `app/lib/.server/telemetry/langfuse.server.ts`
+
+Langfuse provides LLM call tracing and observability. It is feature-flagged and gracefully degrades when disabled.
+
+### 12.1 Configuration
+
+| Env Var | Required | Default | Purpose |
+|---------|----------|---------|---------|
+| `LANGFUSE_ENABLED` | No | `false` | Master toggle |
+| `LANGFUSE_PUBLIC_KEY` | If enabled | - | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | If enabled | - | Langfuse secret key |
+| `LANGFUSE_BASE_URL` | No | `https://cloud.langfuse.com` | Self-hosted URL |
+
+### 12.2 Architecture
+
+```
+Singleton client: getLangfuseClient(env?)
+  |
+  +--> isLangfuseEnabled(env) checks LANGFUSE_ENABLED + credentials
+  +--> Graceful fallback: returns null if disabled/misconfigured
+  +--> Environment detection: uses Cloudflare env or process.env fallback
+  |
+  v
+Tracing API:
+  createTrace(env, { name, userId, sessionId, metadata, input })
+    --> LangfuseTraceContext { traceId, userId?, sessionId? }
+  |
+  createGeneration(env, traceContext, { name, model, input })
+    --> { generationId, end(metadata) }
+    --> end() records: output, token usage, provider, finishReason
+  |
+  flushTraces(env)
+    --> client.flushAsync() -- call with ctx.waitUntil() on Cloudflare edge
+```
+
+### 12.3 Integration Points
+
+The generation pipeline (`projectGenerationService.ts`) creates Langfuse traces at:
+
+- **Template selection** (Phase 1): Traces the fast LLM call for template matching
+- **Content generation** (Phase 2): Traces the main LLM streaming call
+
+Each generation span records model, provider, token usage, latency, and finish reason.

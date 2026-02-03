@@ -69,6 +69,7 @@ pnpm run typegen          # Generate Wrangler types
 - **State Management**: Nanostores (reactive stores), Zustand (complex state)
 - **AI Integration**: Vercel AI SDK (ai 4.3.16) with 19+ LLM provider support
 - **Code Execution**: WebContainer API 1.6.1 (in-browser Node.js environment)
+- **Observability**: Langfuse for LLM call tracing (feature-flagged via `LANGFUSE_ENABLED`)
 - **Authentication**: Better Auth 1.4.1 (email/password + OAuth, Drizzle adapter)
 - **Database**: Supabase/PostgreSQL with Drizzle ORM 0.44.7
 - **Storage**: Cloudflare R2/S3 for workspace archives, WebContainer FS for active edits
@@ -143,9 +144,17 @@ app/
 │   │   ├── infoCollectionService.server.ts # Business info collection
 │   │   ├── contentTransformer.ts       # Content transformation
 │   │   └── sseUtils.ts                 # SSE utilities
-│   ├── .server/llm/          # Server-side LLM integration (Remix .server pattern)
-│   │   ├── stream-text.ts    # AI streaming with SSE
-│   │   └── providers/        # LLM provider implementations
+│   ├── .server/              # Server-side modules (Remix .server pattern)
+│   │   ├── llm/              # LLM integration
+│   │   │   ├── stream-text.ts # AI streaming with SSE
+│   │   │   └── providers/    # LLM provider implementations
+│   │   ├── telemetry/        # Observability
+│   │   │   └── langfuse.server.ts # Langfuse LLM tracing
+│   │   └── templates/        # Template resolution
+│   │       ├── template-resolver.ts    # Zip-first, GitHub fallback
+│   │       ├── zip-template-fetcher.ts # Local zip extraction
+│   │       ├── github-template-fetcher.ts # GitHub fallback
+│   │       └── template-primer.ts      # Template priming
 │   ├── runtime/              # Code execution runtime
 │   │   ├── action-runner.ts  # Executes AI-generated actions
 │   │   └── message-parser.ts # Parses AI responses into actions
@@ -170,7 +179,14 @@ app/
 │   ├── restaurant-theme.ts   # Restaurant theme types
 │   ├── template.ts           # Template types
 │   └── message-loading.ts    # Message loading types
+├── theme-prompts/            # Restaurant theme prompt templates (12 themes)
+│   ├── registry.ts           # Theme registry
+│   └── *.md                  # Individual theme prompts (Indochineluxe, etc.)
 └── utils/                    # Utility functions
+
+tests/                         # Test suites
+├── unit/                     # Unit tests (Vitest)
+└── integration/              # Integration tests
 
 scripts/                       # Build & migration scripts
 ├── migrate-auth.ts           # Better Auth migration (with safety checks)
@@ -183,13 +199,17 @@ supabase/                      # Supabase configuration & migrations
 
 templates/                    # Website templates (for HuskIT fork)
 ├── registry.json             # Template metadata
+├── indochine-luxe.zip        # Active template (zip-first loading)
 └── restaurant-*/             # Restaurant-specific templates
 
 docs/                          # Extended documentation (21 subdirectories)
 
-specs/                         # Feature specifications (12 specs)
+specs/                         # Feature specifications (15 specs)
 ├── 001-phase1-plan/          # Phase 1 plan (spec, plan, tasks, contracts)
 ├── 002-better-auth/          # Better Auth implementation (full spec)
+├── 003-zip-template-support/ # Zip-first template resolution
+├── 001-langfuse-integration/ # Langfuse LLM observability
+├── 001-enhanced-markdown-crawler/ # Markdown generation from crawler
 ├── 001-crawler-api-integration/
 ├── 001-hybrid-context-selection/
 ├── 001-llm-website-generation/
@@ -208,6 +228,8 @@ functions/[[path]].ts         # Cloudflare Pages functions
 **1. Remix .server Pattern**
 Server-side code uses `.server` suffix to ensure it never bundles to client:
 - `app/lib/.server/llm/*` - LLM streaming, prompt management
+- `app/lib/.server/telemetry/*` - Langfuse observability
+- `app/lib/.server/templates/*` - Template resolution (zip-first, GitHub fallback)
 - `app/lib/auth/*.server.ts` - Auth guards, session management
 - `app/lib/db/*.server.ts` - Database connections
 - `app/lib/services/*.server.ts` - Server-side services
@@ -266,10 +288,13 @@ Action Runner → WebContainer → File Changes → Preview Update
 - Message sync infrastructure in `app/lib/persistence/` (merge, validation, sort)
 
 **9. Crawler & Generation Pipeline**
-- Crawler client: `app/lib/services/crawlerClient.server.ts` (search, extract, generate endpoints)
+- Crawler client: `app/lib/services/crawlerClient.server.ts` (search, extract, generate, markdown endpoints)
+- Markdown generation: `generateGoogleMapsMarkdown()` and `crawlWebsiteMarkdown()` for richer context
+- Parallel markdown fetching in `api.crawler.extract` using `Promise.allSettled` with graceful degradation
 - Mock crawler: `app/lib/services/crawlerService.ts` (fallback with cuisine detection)
 - Content transformer: `app/lib/services/contentTransformer.ts`
 - Generation services: `projectGenerationService.ts`, `websiteGenerationService.ts`
+- Template resolution: zip-first loading via `app/lib/.server/templates/template-resolver.ts`
 - Info collection: `app/lib/services/infoCollectionService.server.ts`
 - API routes: `api.crawler.search`, `api.crawler.extract`, `api.crawler.generate`, `api.project.generate`, `api.site.generate`
 - Onboarding: search-first flow (name+address → verify → crawl → auto-build), manual Maps URL as fallback
@@ -323,6 +348,8 @@ This fork is being adapted for restaurant website generation:
 - `CRAWLER_API_URL` - HuskIT Crawler API endpoint (default: http://localhost:4999)
 - `INTERNAL_PLACES_SERVICE_URL` - Internal Places Data Service endpoint
 - `INTERNAL_PLACES_SERVICE_TOKEN` - Service authentication token
+- `LANGFUSE_ENABLED` - Enable Langfuse LLM tracing (default: false)
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` - Langfuse credentials
 - Better Auth and Supabase connection vars required for auth/database
 
 ### Hot Module Reload (HMR)
@@ -373,8 +400,12 @@ All PRs must pass:
 - Better Auth 1.4.1 for authentication (email/password + OAuth)
 - Drizzle ORM 0.44.7 + PostgreSQL (postgres 3.4.7) for database access
 - Supabase for hosted PostgreSQL and migrations
+- Langfuse for LLM observability and tracing (feature-flagged)
 
 ## Recent Changes
+- **Langfuse + enhanced markdown crawler (PR #30)**: Langfuse LLM observability integration with feature flag, new `generateGoogleMapsMarkdown()` and `crawlWebsiteMarkdown()` crawler endpoints, parallel markdown fetching with `Promise.allSettled`, extended `BusinessProfile` type with markdown fields, theme prompt updates for strict markdown output format
+- **Chat UI side-by-side (PR #29)**: Always show chat panel (40% width, max 600px) and workbench (60%) side-by-side, removed landing page experience, auto-show workbench on mount, welcome message for new projects
+- **Zip template resolution (PR #28)**: Zip-first template loading with GitHub fallback, secure zip extraction (zip slip mitigation), unified `template-resolver.ts` with Cloudflare edge detection, 25 unit tests
 - **Onboarding search flow (PR #27)**: Search-first onboarding (name+address → verify → crawl → auto-build), new `/api/crawler/search` endpoint, multi-method crawl input, `CreateProjectPage.tsx` wizard with 5 internal states
 - **002-better-auth**: Implemented Better Auth with Drizzle adapter, email/password + Google OAuth, session management, auth guards, and password migration
 - **Email auth fix (PR #26)**: Enabled email/password authentication, fixed login sessions, added password migration script
