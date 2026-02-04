@@ -35,7 +35,7 @@ import {
 } from '~/lib/services/crawlerClient.server';
 
 describe('generateGoogleMapsMarkdown', () => {
-  const testSessionId = 'test-session-123';
+  const testPlaceId = 'test-place-123';
 
   it('should return markdown on success response', async () => {
     const mockMarkdown = '# Restaurant Name\n\nGreat place for dining.';
@@ -48,7 +48,7 @@ describe('generateGoogleMapsMarkdown', () => {
       }),
     });
 
-    const result = await generateGoogleMapsMarkdown(testSessionId);
+    const result = await generateGoogleMapsMarkdown(testPlaceId);
 
     expect(result.success).toBe(true);
     expect(result.markdown).toBe(mockMarkdown);
@@ -57,7 +57,7 @@ describe('generateGoogleMapsMarkdown', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: testSessionId }),
+        body: JSON.stringify({ place_id: testPlaceId }),
       }),
     );
   });
@@ -71,7 +71,7 @@ describe('generateGoogleMapsMarkdown', () => {
       }),
     });
 
-    const result = await generateGoogleMapsMarkdown(testSessionId);
+    const result = await generateGoogleMapsMarkdown(testPlaceId);
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Session not found');
@@ -85,7 +85,7 @@ describe('generateGoogleMapsMarkdown', () => {
 
     mockFetch.mockRejectedValueOnce(abortError);
 
-    const result = await generateGoogleMapsMarkdown(testSessionId);
+    const result = await generateGoogleMapsMarkdown(testPlaceId);
 
     expect(result.success).toBe(false);
     expect(result.error?.toLowerCase()).toContain('timed out');
@@ -95,7 +95,7 @@ describe('generateGoogleMapsMarkdown', () => {
   it('should handle network errors gracefully', async () => {
     mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
-    const result = await generateGoogleMapsMarkdown(testSessionId);
+    const result = await generateGoogleMapsMarkdown(testPlaceId);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Crawler unavailable');
@@ -104,17 +104,14 @@ describe('generateGoogleMapsMarkdown', () => {
 });
 
 describe('crawlWebsiteMarkdown', () => {
-  const testRequest = {
-    url: 'https://example-restaurant.com',
-    session_id: 'test-session-456',
-    enable_visual_analysis: true,
-  };
+  const testPlaceId = 'test-place-456';
+  const testUrl = 'https://example-restaurant.com';
 
   it('should return markdown data on success response', async () => {
     const mockData = {
       markdown: '# Example Restaurant\n\nWelcome to our website.',
-      session_id: testRequest.session_id,
-      url: testRequest.url,
+      place_id: testPlaceId,
+      url: testUrl,
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -125,7 +122,7 @@ describe('crawlWebsiteMarkdown', () => {
       }),
     });
 
-    const result = await crawlWebsiteMarkdown(testRequest);
+    const result = await crawlWebsiteMarkdown(testPlaceId, testUrl, { enable_visual_analysis: true });
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(mockData);
@@ -147,7 +144,7 @@ describe('crawlWebsiteMarkdown', () => {
       }),
     });
 
-    const result = await crawlWebsiteMarkdown(testRequest);
+    const result = await crawlWebsiteMarkdown(testPlaceId, testUrl, { enable_visual_analysis: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Internal server error');
@@ -160,7 +157,7 @@ describe('crawlWebsiteMarkdown', () => {
 
     mockFetch.mockRejectedValueOnce(abortError);
 
-    const result = await crawlWebsiteMarkdown(testRequest);
+    const result = await crawlWebsiteMarkdown(testPlaceId, testUrl, { enable_visual_analysis: true });
 
     expect(result.success).toBe(false);
     expect(result.error?.toLowerCase()).toContain('timed out');
@@ -170,7 +167,7 @@ describe('crawlWebsiteMarkdown', () => {
   it('should handle network errors gracefully', async () => {
     mockFetch.mockRejectedValueOnce(new Error('ENOTFOUND'));
 
-    const result = await crawlWebsiteMarkdown(testRequest);
+    const result = await crawlWebsiteMarkdown(testPlaceId, testUrl, { enable_visual_analysis: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Crawler unavailable');
@@ -195,7 +192,7 @@ describe('crawlWebsiteMarkdown', () => {
       }),
     });
 
-    await crawlWebsiteMarkdown(minimalRequest);
+    await crawlWebsiteMarkdown(minimalRequest.session_id, minimalRequest.url);
 
     expect(mockFetch).toHaveBeenCalledWith(
       expect.any(String),

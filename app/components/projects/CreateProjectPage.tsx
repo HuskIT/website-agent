@@ -23,7 +23,8 @@ export default function CreateProjectPage() {
   const [mapsUrl, setMapsUrl] = useState('');
 
   // Crawler state
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [sessionId] = useState(() => crypto.randomUUID()); // Deprecated - kept for backwards compatibility
+  const [placeId, setPlaceId] = useState<string | null>(null); // Google Place ID (primary identifier)
   const [crawlError, setCrawlError] = useState<string | null>(null);
   const [isCrawling, setIsCrawling] = useState(false);
 
@@ -158,7 +159,8 @@ export default function CreateProjectPage() {
      * Use passed markdown values first (fresh from API), then fall back to state
      */
     const businessProfile = {
-      session_id: sessionId,
+      place_id: placeId || undefined,
+      session_id: sessionId, // Deprecated - kept for backwards compatibility
       gmaps_url: mapsUrl.trim() || undefined,
       google_maps_markdown: markdown?.googleMaps ?? googleMapsMarkdown ?? undefined,
       website_markdown: markdown?.website ?? websiteMarkdown ?? undefined,
@@ -169,7 +171,8 @@ export default function CreateProjectPage() {
       name: finalName,
       gmaps_url: mapsUrl.trim() || undefined,
       address: { line1: finalAddress },
-      session_id: sessionId,
+      place_id: placeId || undefined,
+      session_id: sessionId, // Deprecated - kept for backwards compatibility
       businessProfile,
     };
 
@@ -213,6 +216,7 @@ export default function CreateProjectPage() {
 
       if (response.ok && result?.success && result?.data) {
         setSearchResult(result.data);
+        setPlaceId(result.data.place_id); // Store place_id from search result
         setStep('verify_search');
       } else {
         const msg = result?.error?.message || 'Could not find business with those details.';
@@ -253,6 +257,8 @@ export default function CreateProjectPage() {
 
       const result: {
         success?: boolean;
+        place_id?: string;
+        session_id?: string;
         google_maps_markdown?: string;
         website_markdown?: string;
         has_website?: boolean;
@@ -260,9 +266,10 @@ export default function CreateProjectPage() {
       } = await response.json();
 
       if (response.ok && result.success && result.google_maps_markdown) {
-        // Store markdown from extract response (for retry scenarios)
+        // Store markdown and place_id from extract response
         setGoogleMapsMarkdown(result.google_maps_markdown);
         setWebsiteMarkdown(result.website_markdown || null);
+        setPlaceId(result.place_id || null);
 
         setIsCrawling(false);
 
