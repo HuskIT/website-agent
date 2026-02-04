@@ -3,11 +3,24 @@ import type { ModelInfo } from '~/lib/modules/llm/types';
 import type { IProviderSetting } from '~/types/model';
 import type { LanguageModelV1 } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
-import { createHash } from 'crypto';
 
-// Generate a stable device ID from API key (hash first 32 chars of SHA-256)
+// Simple hash function that works in both browser and Node.js
+// Uses a fast non-cryptographic hash (djb2) - sufficient for device ID generation
+function simpleHash(str: string): string {
+  let hash = 5381;
+
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+
+  // Convert to hex string and ensure it's 32 chars
+  const hexHash = (hash >>> 0).toString(16);
+  return hexHash.padStart(8, '0').repeat(4).slice(0, 32);
+}
+
+// Generate a stable device ID from API key
 function getDeviceIdFromApiKey(apiKey: string): string {
-  return createHash('sha256').update(apiKey).digest('hex').slice(0, 32);
+  return simpleHash(apiKey);
 }
 
 export default class MoonshotProvider extends BaseProvider {
