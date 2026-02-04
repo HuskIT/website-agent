@@ -110,11 +110,7 @@ Monday-Sunday: 11am-10pm`;
       // Execute parallel markdown generation (simulating api.crawler.extract behavior)
       const [gmapsResult, websiteResult] = await Promise.allSettled([
         generateGoogleMapsMarkdown(sessionId),
-        crawlWebsiteMarkdown({
-          url: websiteUrl,
-          session_id: sessionId,
-          enable_visual_analysis: true,
-        }),
+        crawlWebsiteMarkdown(sessionId, websiteUrl, { enable_visual_analysis: true }),
       ]);
 
       // Verify both succeed
@@ -219,11 +215,7 @@ Recent highlights: "Amazing pasta", "Great atmosphere"`;
       const [gmapsResult, websiteResult] = await Promise.allSettled([
         generateGoogleMapsMarkdown(sessionId),
         crawledWebsiteUrl
-          ? crawlWebsiteMarkdown({
-              url: crawledWebsiteUrl,
-              session_id: sessionId,
-              enable_visual_analysis: true,
-            })
+          ? crawlWebsiteMarkdown(sessionId, crawledWebsiteUrl, { enable_visual_analysis: true })
           : Promise.resolve({ success: false, error: 'No website URL' } as const),
       ]);
 
@@ -262,11 +254,7 @@ Recent highlights: "Amazing pasta", "Great atmosphere"`;
 
       const [gmapsResult, websiteResult] = await Promise.allSettled([
         generateGoogleMapsMarkdown(sessionId),
-        crawlWebsiteMarkdown({
-          url: websiteUrl,
-          session_id: sessionId,
-          enable_visual_analysis: true,
-        }),
+        crawlWebsiteMarkdown(sessionId, websiteUrl, { enable_visual_analysis: true }),
       ]);
 
       // Google Maps should succeed regardless of website timeout
@@ -307,11 +295,7 @@ Recent highlights: "Amazing pasta", "Great atmosphere"`;
 
       const [gmapsResult, websiteResult] = await Promise.allSettled([
         generateGoogleMapsMarkdown(sessionId),
-        crawlWebsiteMarkdown({
-          url: websiteUrl,
-          session_id: sessionId,
-          enable_visual_analysis: true,
-        }),
+        crawlWebsiteMarkdown(sessionId, websiteUrl, { enable_visual_analysis: true }),
       ]);
 
       // Google Maps should still succeed
@@ -354,7 +338,7 @@ Recent highlights: "Amazing pasta", "Great atmosphere"`;
 
       const [gmapsResult, websiteResult] = await Promise.allSettled([
         generateGoogleMapsMarkdown(sessionId),
-        crawlWebsiteMarkdown({ url: websiteUrl, session_id: sessionId }),
+        crawlWebsiteMarkdown(sessionId, websiteUrl),
       ]);
 
       // Extract values (simulating api.crawler.extract logic)

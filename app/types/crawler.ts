@@ -15,16 +15,18 @@ export interface CrawlSession {
 }
 
 export interface CrawlRequest {
-  session_id: string;
+  place_id?: string; // Primary identifier (Google Place ID)
+  session_id?: string; // Deprecated - kept for backwards compatibility
   google_maps_url?: string;
   business_name?: string;
   address?: string;
   website_url?: string;
-  place_id?: string;
 }
 
 export interface CrawlResponse {
   success: boolean;
+  place_id?: string; // Google Place ID extracted/returned by crawler
+  session_id?: string; // Deprecated - kept for backwards compatibility
   data?: BusinessData;
   error?: string;
   statusCode?: number; // Track HTTP status from crawler API
@@ -71,12 +73,14 @@ export interface Photo {
 }
 
 export interface GenerateContentRequest {
-  session_id: string;
+  place_id?: string; // Primary identifier (Google Place ID)
+  session_id?: string; // Deprecated - kept for backwards compatibility
 }
 
 export interface GenerateContentResponse {
   success: boolean;
-  session_id: string;
+  place_id?: string; // Primary identifier (Google Place ID)
+  session_id?: string; // Deprecated - kept for backwards compatibility
   data?: GeneratedContent;
   error?: string;
   statusCode?: number; // Track HTTP status from crawler API
@@ -217,10 +221,11 @@ export interface SearchRestaurantResponse {
 
 /**
  * Request to generate markdown from previously crawled Google Maps data.
- * Requires prior /crawl call with the same session_id.
+ * Requires prior /crawl call with the same place_id.
  */
 export interface GenerateGoogleMapsMarkdownRequest {
-  session_id: string;
+  place_id?: string; // Primary identifier (Google Place ID)
+  session_id?: string; // Deprecated - kept for backwards compatibility
 }
 
 /**
@@ -228,6 +233,12 @@ export interface GenerateGoogleMapsMarkdownRequest {
  */
 export interface GenerateGoogleMapsMarkdownResponse {
   success: boolean;
+
+  /** Google Place ID */
+  place_id?: string;
+
+  /** Deprecated - kept for backwards compatibility */
+  session_id?: string;
 
   /** Markdown content (only present on success) */
   markdown?: string;
@@ -248,8 +259,11 @@ export interface CrawlWebsiteMarkdownRequest {
   /** Website URL to crawl */
   url: string;
 
-  /** Session ID linking to prior /crawl operation */
-  session_id: string;
+  /** Google Place ID linking to prior /crawl operation */
+  place_id?: string;
+
+  /** Deprecated - kept for backwards compatibility */
+  session_id?: string;
 
   /** Maximum pages to crawl (default: 1, homepage only) */
   max_pages?: number;
@@ -264,13 +278,19 @@ export interface CrawlWebsiteMarkdownRequest {
 export interface CrawlWebsiteMarkdownResponse {
   success: boolean;
 
+  /** Google Place ID */
+  place_id?: string;
+
   /** Response data (only present on success) */
   data?: {
     /** Markdown content with visual style descriptions */
     markdown: string;
 
-    /** Session ID (echoed back) */
-    session_id: string;
+    /** Google Place ID (echoed back) */
+    place_id?: string;
+
+    /** Deprecated - kept for backwards compatibility */
+    session_id?: string;
 
     /** Crawled URL */
     url: string;

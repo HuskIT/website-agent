@@ -51,13 +51,15 @@ export interface CreateProjectInput {
   description?: string;
   gmaps_url?: string;
   address?: Record<string, unknown>;
-  session_id?: string; // Crawler session ID (1:1 with project)
+  place_id?: string; // Google Place ID (stable identifier)
+  session_id?: string; // Deprecated - kept for backwards compatibility
   businessProfile?: BusinessProfile; // Crawler data and generated content
 }
 
 // Business profile data from crawler API
 export interface BusinessProfile {
-  session_id?: string;
+  place_id?: string; // Google Place ID (stable identifier)
+  session_id?: string; // Deprecated - kept for backwards compatibility
   gmaps_url?: string;
   crawled_at?: string;
 

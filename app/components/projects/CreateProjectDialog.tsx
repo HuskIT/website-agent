@@ -35,7 +35,8 @@ export function CreateProjectDialog({
   const [mapsUrl, setMapsUrl] = useState('');
 
   // Crawler state
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [sessionId] = useState(() => crypto.randomUUID()); // Deprecated - kept for backwards compatibility
+  const [placeId, setPlaceId] = useState<string | null>(null); // Google Place ID (primary identifier)
   const [crawledData, setCrawledData] = useState<BusinessData | null>(null);
   const [crawlError, setCrawlError] = useState<string | null>(null);
   const [isCrawling, setIsCrawling] = useState(false);
@@ -75,6 +76,7 @@ export function CreateProjectDialog({
       setBusinessAddress('');
       setMapsUrl('');
       setTouched({ name: false, address: false, maps: false });
+      setPlaceId(null);
       setCrawledData(null);
       setCrawlError(null);
       setIsCrawling(false);
@@ -208,11 +210,17 @@ export function CreateProjectDialog({
         }),
       });
 
-      const result: { success?: boolean; data?: BusinessData; error?: string | { message?: string } } =
-        await response.json();
+      const result: {
+        success?: boolean;
+        place_id?: string;
+        session_id?: string;
+        data?: BusinessData;
+        error?: string | { message?: string };
+      } = await response.json();
 
       if (response.ok && result.success && result.data) {
         setCrawledData(result.data);
+        setPlaceId(result.place_id || null);
         setWebsiteCrawled(!!result.data.website && result.data.website.trim().length > 0);
         setIsCrawling(false);
         setStep('review');
@@ -259,7 +267,8 @@ export function CreateProjectDialog({
 
     // Always attach a minimal businessProfile so generation can proceed even in fallback mode
     const businessProfile = {
-      session_id: sessionId,
+      place_id: placeId || undefined,
+      session_id: sessionId, // Deprecated - kept for backwards compatibility
       gmaps_url: mapsUrl.trim() || undefined,
       crawled_data: (crawledData ?? {
         name: businessName.trim(),
@@ -272,7 +281,8 @@ export function CreateProjectDialog({
       name: businessName.trim(),
       gmaps_url: mapsUrl.trim() || undefined,
       address: { line1: businessAddress.trim() },
-      session_id: sessionId,
+      place_id: placeId || undefined,
+      session_id: sessionId, // Deprecated - kept for backwards compatibility
       businessProfile,
     };
 

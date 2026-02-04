@@ -1,5 +1,7 @@
 import { LLMManager } from '~/lib/modules/llm/manager';
 import type { Template } from '~/types/template';
+import { DEFAULT_PROVIDER_NAME } from './defaults';
+export { DEFAULT_MODEL } from './defaults';
 
 export const WORK_DIR_NAME = 'project';
 export const WORK_DIR = `/home/${WORK_DIR_NAME}`;
@@ -17,7 +19,7 @@ export const TOOL_EXECUTION_DENIED = 'Error: User denied access to tool executio
 export const TOOL_EXECUTION_ERROR = 'Error: An error occured while calling tool';
 
 const isTest = typeof process !== 'undefined' && !!process.env?.VITEST;
-const llmManager = isTest ? null : LLMManager.getInstance(import.meta.env);
+const llmManager = isTest ? null : LLMManager.getInstance(import.meta.env, { defaultProvider: DEFAULT_PROVIDER_NAME });
 
 export const PROVIDER_LIST = llmManager ? llmManager.getAllProviders() : [];
 export const DEFAULT_PROVIDER = llmManager ? llmManager.getDefaultProvider() : undefined;

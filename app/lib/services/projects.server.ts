@@ -86,7 +86,10 @@ export async function createProject(userId: string, input: CreateProjectInput): 
     const supabase = await createUserSupabaseClient(userId);
 
     // Check project count limit (soft limit of 10)
-    const { count: existingCount } = await supabase.from('projects').select('*', { count: 'exact', head: true });
+    const { count: existingCount } = await supabase
+      .from('projects')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
 
     if (existingCount && existingCount >= 10) {
       throw new Error(

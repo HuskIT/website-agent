@@ -20,7 +20,6 @@ import type {
   GenerateContentResponse,
   SearchRestaurantResponse,
   GenerateGoogleMapsMarkdownResponse,
-  CrawlWebsiteMarkdownRequest,
   CrawlWebsiteMarkdownResponse,
 } from '~/types/crawler';
 
@@ -66,18 +65,16 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
  * 3. Website URL
  * 4. Verified Data (via Search)
  *
- * @param payload - Crawl request payload
+ * @param payload - Crawl request payload (supports both place_id and session_id)
  * @returns CrawlResponse with extracted business data or error
  */
-export async function extractBusinessData(
-  payload: Omit<CrawlRequest, 'session_id'> & { session_id: string },
-): Promise<CrawlResponse> {
+export async function extractBusinessData(payload: CrawlRequest): Promise<CrawlResponse> {
   const startTime = Date.now();
-  const { session_id: sessionId, ...rest } = payload;
+  const { place_id: placeId, ...rest } = payload;
 
   try {
     logger.info(`[Crawler] Extracting business data`, {
-      sessionId,
+      placeId,
       method: payload.google_maps_url ? 'URL' : payload.business_name ? 'Name+Address' : 'Other',
       payload: rest,
     });
@@ -98,7 +95,7 @@ export async function extractBusinessData(
 
     if (!response.ok) {
       logger.error(`[Crawler] Extraction failed`, {
-        sessionId,
+        placeId,
         status: response.status,
         statusText: response.statusText,
         duration: `${duration}ms`,
@@ -127,6 +124,7 @@ export async function extractBusinessData(
 
       return {
         success: false,
+        place_id: placeId,
         error: errorDetails,
         statusCode: response.status, // Include status code
       };
@@ -135,7 +133,7 @@ export async function extractBusinessData(
     const data: unknown = await response.json();
 
     logger.info(`[Crawler] Extraction successful`, {
-      sessionId,
+      placeId,
       duration: `${duration}ms`,
       hasData: !!(data as any)?.data,
     });
@@ -147,12 +145,13 @@ export async function extractBusinessData(
     // Handle timeout specifically
     if (error instanceof Error && error.message.includes('timed out')) {
       logger.error(`[Crawler] Extraction timed out`, {
-        sessionId,
+        placeId,
         duration: `${duration}ms`,
       });
 
       return {
         success: false,
+        place_id: placeId,
         error: `Request timed out after ${CRAWLER_TIMEOUT}ms`,
         statusCode: 408, // Request Timeout
       };
@@ -161,7 +160,7 @@ export async function extractBusinessData(
     // Handle network errors (ECONNREFUSED, ENOTFOUND, etc.)
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`[Crawler] Network error`, {
-      sessionId,
+      placeId,
       error: errorMessage,
       duration: `${duration}ms`,
       crawlerUrl: CRAWLER_API_URL, // Log which URL we're trying
@@ -169,6 +168,7 @@ export async function extractBusinessData(
 
     return {
       success: false,
+      place_id: placeId,
       error: `Crawler API unavailable (${errorMessage})`,
       statusCode: 503, // Service Unavailable
     };
@@ -185,17 +185,17 @@ export async function extractBusinessData(
  * - Industry context (categories, pricing tier)
  * - Content sections (hero, about, products, etc.)
  *
- * Prerequisites: extractBusinessData must have been called with the same sessionId
+ * Prerequisites: extractBusinessData must have been called with the same place_id
  *
- * @param sessionId - Unique session ID (must match previous extractBusinessData call)
+ * @param placeId - Google Place ID (required)
  * @returns GenerateContentResponse with AI-generated content or error
  */
-export async function generateWebsiteContent(sessionId: string): Promise<GenerateContentResponse> {
+export async function generateWebsiteContent(placeId: string): Promise<GenerateContentResponse> {
   const startTime = Date.now();
 
   try {
     logger.info(`[Crawler] Generating website content`, {
-      sessionId,
+      placeId,
     });
 
     const response = await fetchWithTimeout(
@@ -205,9 +205,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          session_id: sessionId,
-        }),
+        body: JSON.stringify({ place_id: placeId }),
       },
       CRAWLER_TIMEOUT,
     );
@@ -216,7 +214,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
 
     if (!response.ok) {
       logger.error(`[Crawler] Generation failed`, {
-        sessionId,
+        placeId,
         status: response.status,
         statusText: response.statusText,
         duration: `${duration}ms`,
@@ -245,7 +243,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
 
       return {
         success: false,
-        session_id: sessionId,
+        place_id: placeId,
         error: errorDetails,
         statusCode: response.status, // Include status code
       };
@@ -254,7 +252,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
     const data: unknown = await response.json();
 
     logger.info(`[Crawler] Generation successful`, {
-      sessionId,
+      placeId,
       duration: `${duration}ms`,
       hasContent: !!(data as any)?.data,
     });
@@ -266,13 +264,13 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
     // Handle timeout specifically
     if (error instanceof Error && error.message.includes('timed out')) {
       logger.error(`[Crawler] Generation timed out`, {
-        sessionId,
+        placeId,
         duration: `${duration}ms`,
       });
 
       return {
         success: false,
-        session_id: sessionId,
+        place_id: placeId,
         error: `Request timed out after ${CRAWLER_TIMEOUT}ms`,
         statusCode: 408, // Request Timeout
       };
@@ -281,7 +279,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
     // Handle network errors (ECONNREFUSED, ENOTFOUND, etc.)
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`[Crawler] Network error`, {
-      sessionId,
+      placeId,
       error: errorMessage,
       duration: `${duration}ms`,
       crawlerUrl: CRAWLER_API_URL, // Log which URL we're trying
@@ -289,7 +287,7 @@ export async function generateWebsiteContent(sessionId: string): Promise<Generat
 
     return {
       success: false,
-      session_id: sessionId,
+      place_id: placeId,
       error: `Crawler API unavailable (${errorMessage})`,
       statusCode: 503, // Service Unavailable
     };
@@ -413,29 +411,29 @@ const MARKDOWN_TIMEOUT = 120_000; // 120 seconds for LLM Vision processing
 /**
  * Generate markdown profile from previously crawled Google Maps data.
  *
- * Prerequisites: extractBusinessData() must have been called with the same sessionId.
- * Caching: Crawler API caches results per session_id.
+ * Prerequisites: extractBusinessData() must have been called with the same place_id.
+ * Caching: Crawler API caches results per place_id.
  *
- * @param sessionId - Session ID from prior /crawl operation
+ * @param placeId - Google Place ID (required)
  * @returns Markdown profile or error
  */
-export async function generateGoogleMapsMarkdown(sessionId: string): Promise<GenerateGoogleMapsMarkdownResponse> {
+export async function generateGoogleMapsMarkdown(placeId: string): Promise<GenerateGoogleMapsMarkdownResponse> {
   const startTime = Date.now();
 
   try {
-    logger.info(`[Crawler] Generating Google Maps markdown`, { sessionId });
+    logger.info(`[Crawler] Generating Google Maps markdown`, { placeId });
 
     const response = await fetchWithTimeout(
       `${CRAWLER_API_URL}/generate-google-maps-markdown`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId }),
+        body: JSON.stringify({ place_id: placeId }),
       },
       MARKDOWN_TIMEOUT,
     );
     logger.info(`[Crawler] Google Maps markdown response`, {
-      sessionId,
+      placeId,
       status: response.status,
       ok: response.ok,
     });
@@ -444,7 +442,7 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
 
     if (!response.ok) {
       logger.error(`[Crawler] Google Maps markdown failed`, {
-        sessionId,
+        placeId,
         status: response.status,
         duration: `${duration}ms`,
       });
@@ -468,6 +466,7 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
 
       return {
         success: false,
+        place_id: placeId,
         error: errorDetails,
         statusCode: response.status,
       };
@@ -477,7 +476,7 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
 
     // Debug logging to investigate response structure and error
     logger.info(`[Crawler] Raw markdown response`, {
-      sessionId,
+      placeId,
       keys: Object.keys(rawData),
       hasMarkdown: !!rawData.markdown,
       hasData: !!rawData.data,
@@ -489,10 +488,10 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
     const data = rawData as unknown as GenerateGoogleMapsMarkdownResponse;
 
     if (data.success) {
-      logger.info(`[Crawler] Google Maps markdown success`, { sessionId, duration: `${duration}ms` });
+      logger.info(`[Crawler] Google Maps markdown success`, { placeId, duration: `${duration}ms` });
     } else {
       logger.warn(`[Crawler] Google Maps markdown returned failure`, {
-        sessionId,
+        placeId,
         duration: `${duration}ms`,
         error: data.error,
       });
@@ -504,18 +503,28 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     if (errorMessage.includes('timed out')) {
-      logger.error(`[Crawler] Google Maps markdown timed out`, { sessionId, duration: `${duration}ms` });
+      logger.error(`[Crawler] Google Maps markdown timed out`, { placeId, duration: `${duration}ms` });
 
-      return { success: false, error: `Timed out after ${MARKDOWN_TIMEOUT}ms`, statusCode: 408 };
+      return {
+        success: false,
+        place_id: placeId,
+        error: `Timed out after ${MARKDOWN_TIMEOUT}ms`,
+        statusCode: 408,
+      };
     }
 
     logger.error(`[Crawler] Google Maps markdown network error`, {
-      sessionId,
+      placeId,
       error: errorMessage,
       duration: `${duration}ms`,
     });
 
-    return { success: false, error: `Crawler unavailable (${errorMessage})`, statusCode: 503 };
+    return {
+      success: false,
+      place_id: placeId,
+      error: `Crawler unavailable (${errorMessage})`,
+      statusCode: 503,
+    };
   }
 }
 
@@ -525,18 +534,22 @@ export async function generateGoogleMapsMarkdown(sessionId: string): Promise<Gen
  * Uses LLM Vision to describe images, layout, and visual style.
  * Timeout: 120 seconds to accommodate Vision processing.
  *
- * @param request - Website URL, session ID, and options
+ * @param placeId - Google Place ID (required)
+ * @param url - Website URL to crawl
+ * @param options - Crawl options (max_pages, enable_visual_analysis)
  * @returns Website markdown or error
  */
 export async function crawlWebsiteMarkdown(
-  request: CrawlWebsiteMarkdownRequest,
+  placeId: string,
+  url: string,
+  options?: { max_pages?: number; enable_visual_analysis?: boolean },
 ): Promise<CrawlWebsiteMarkdownResponse> {
   const startTime = Date.now();
 
   try {
     logger.info(`[Crawler] Crawling website for markdown`, {
-      url: request.url,
-      sessionId: request.session_id,
+      url,
+      placeId,
     });
 
     const response = await fetchWithTimeout(
@@ -545,10 +558,10 @@ export async function crawlWebsiteMarkdown(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: request.url,
-          max_pages: request.max_pages ?? 1,
-          session_id: request.session_id,
-          enable_visual_analysis: request.enable_visual_analysis ?? true,
+          place_id: placeId,
+          url,
+          max_pages: options?.max_pages ?? 1,
+          enable_visual_analysis: options?.enable_visual_analysis ?? true,
         }),
       },
       MARKDOWN_TIMEOUT,
@@ -558,7 +571,8 @@ export async function crawlWebsiteMarkdown(
 
     if (!response.ok) {
       logger.error(`[Crawler] Website markdown failed`, {
-        url: request.url,
+        url,
+        placeId,
         status: response.status,
         duration: `${duration}ms`,
       });
@@ -581,6 +595,7 @@ export async function crawlWebsiteMarkdown(
 
       return {
         success: false,
+        place_id: placeId,
         error: errorDetails,
         statusCode: response.status,
       };
@@ -588,7 +603,8 @@ export async function crawlWebsiteMarkdown(
 
     const data = (await response.json()) as CrawlWebsiteMarkdownResponse;
     logger.info(`[Crawler] Website markdown success`, {
-      url: request.url,
+      url,
+      placeId,
       duration: `${duration}ms`,
     });
 
@@ -599,19 +615,31 @@ export async function crawlWebsiteMarkdown(
 
     if (errorMessage.includes('timed out')) {
       logger.error(`[Crawler] Website markdown timed out`, {
-        url: request.url,
+        url,
+        placeId,
         duration: `${duration}ms`,
       });
 
-      return { success: false, error: `Timed out after ${MARKDOWN_TIMEOUT}ms`, statusCode: 408 };
+      return {
+        success: false,
+        place_id: placeId,
+        error: `Timed out after ${MARKDOWN_TIMEOUT}ms`,
+        statusCode: 408,
+      };
     }
 
     logger.error(`[Crawler] Website markdown network error`, {
-      url: request.url,
+      url,
+      placeId,
       error: errorMessage,
       duration: `${duration}ms`,
     });
 
-    return { success: false, error: `Crawler unavailable (${errorMessage})`, statusCode: 503 };
+    return {
+      success: false,
+      place_id: placeId,
+      error: `Crawler unavailable (${errorMessage})`,
+      statusCode: 503,
+    };
   }
 }
