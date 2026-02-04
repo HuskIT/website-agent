@@ -67,7 +67,8 @@
       "Bash(pnpm install --no-frozen-lockfile)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "mcp__nia__nia_research"
     ],
     "deny": [],
     "ask": []

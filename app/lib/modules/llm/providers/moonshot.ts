@@ -3,6 +3,12 @@ import type { ModelInfo } from '~/lib/modules/llm/types';
 import type { IProviderSetting } from '~/types/model';
 import type { LanguageModelV1 } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createHash } from 'crypto';
+
+// Generate a stable device ID from API key (hash first 32 chars of SHA-256)
+function getDeviceIdFromApiKey(apiKey: string): string {
+  return createHash('sha256').update(apiKey).digest('hex').slice(0, 32);
+}
 
 export default class MoonshotProvider extends BaseProvider {
   name = 'Moonshot';
@@ -13,32 +19,13 @@ export default class MoonshotProvider extends BaseProvider {
   };
 
   staticModels: ModelInfo[] = [
-    { name: 'moonshot-v1-8k', label: 'Moonshot v1 8K', provider: 'Moonshot', maxTokenAllowed: 8000 },
-    { name: 'moonshot-v1-32k', label: 'Moonshot v1 32K', provider: 'Moonshot', maxTokenAllowed: 32000 },
-    { name: 'moonshot-v1-128k', label: 'Moonshot v1 128K', provider: 'Moonshot', maxTokenAllowed: 128000 },
-    { name: 'moonshot-v1-auto', label: 'Moonshot v1 Auto', provider: 'Moonshot', maxTokenAllowed: 128000 },
     {
-      name: 'moonshot-v1-8k-vision-preview',
-      label: 'Moonshot v1 8K Vision',
+      name: 'kimi-for-coding',
+      label: 'Kimi for Coding',
       provider: 'Moonshot',
-      maxTokenAllowed: 8000,
+      maxTokenAllowed: 256000,
+      maxCompletionTokens: 32000,
     },
-    {
-      name: 'moonshot-v1-32k-vision-preview',
-      label: 'Moonshot v1 32K Vision',
-      provider: 'Moonshot',
-      maxTokenAllowed: 32000,
-    },
-    {
-      name: 'moonshot-v1-128k-vision-preview',
-      label: 'Moonshot v1 128K Vision',
-      provider: 'Moonshot',
-      maxTokenAllowed: 128000,
-    },
-    { name: 'kimi-latest', label: 'Kimi Latest', provider: 'Moonshot', maxTokenAllowed: 128000 },
-    { name: 'kimi-k2-0711-preview', label: 'Kimi K2 Preview', provider: 'Moonshot', maxTokenAllowed: 128000 },
-    { name: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo', provider: 'Moonshot', maxTokenAllowed: 128000 },
-    { name: 'kimi-thinking-preview', label: 'Kimi Thinking', provider: 'Moonshot', maxTokenAllowed: 128000 },
   ];
 
   getModelInstance(options: {
@@ -62,8 +49,17 @@ export default class MoonshotProvider extends BaseProvider {
     }
 
     const openai = createOpenAI({
-      baseURL: 'https://api.moonshot.ai/v1',
+      baseURL: 'https://api.kimi.com/coding/v1',
       apiKey,
+      headers: {
+        'User-Agent': 'KimiCLI/1.3',
+        'X-Msh-Platform': 'kimi_cli',
+        'X-Msh-Version': '1.3.0',
+        'X-Msh-Device-Name': 'huskit-website-agent',
+        'X-Msh-Device-Model': 'Node.js Server',
+        'X-Msh-Os-Version': typeof process !== 'undefined' ? process.version : 'unknown',
+        'X-Msh-Device-Id': getDeviceIdFromApiKey(apiKey),
+      },
     });
 
     return openai(model);
