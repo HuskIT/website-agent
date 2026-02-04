@@ -19,7 +19,13 @@ export default class MoonshotProvider extends BaseProvider {
   };
 
   staticModels: ModelInfo[] = [
-    { name: 'kimi-for-coding', label: 'Kimi for Coding', provider: 'Moonshot', maxTokenAllowed: 256000, maxCompletionTokens: 32000 },
+    {
+      name: 'kimi-for-coding',
+      label: 'Kimi for Coding',
+      provider: 'Moonshot',
+      maxTokenAllowed: 256000,
+      maxCompletionTokens: 32000,
+    },
   ];
 
   getModelInstance(options: {
