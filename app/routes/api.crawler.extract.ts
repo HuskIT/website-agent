@@ -264,17 +264,28 @@ export async function action({ request }: ActionFunctionArgs) {
     /*
      * ─── Generate Markdown in Parallel ─────────────────────────────────
      * After successful extractBusinessData(), call markdown endpoints
+     * Use place_id from crawler response (required)
      */
     const crawledWebsiteUrl = result.data?.website || websiteUrl;
+    const extractedPlaceId = result.place_id || placeId;
+
+    if (!extractedPlaceId) {
+      logger.error(`[API] No place_id available after crawl`, { sessionId });
+      return json(
+        {
+          error: {
+            code: 'MISSING_PLACE_ID',
+            message: 'Crawler did not return a place_id',
+          },
+        },
+        { status: 500 },
+      );
+    }
 
     const [gmapsMarkdownResult, websiteMarkdownResult] = await Promise.allSettled([
-      generateGoogleMapsMarkdown(sessionId),
+      generateGoogleMapsMarkdown(extractedPlaceId),
       crawledWebsiteUrl
-        ? crawlWebsiteMarkdown({
-            url: crawledWebsiteUrl,
-            session_id: sessionId,
-            enable_visual_analysis: true,
-          })
+        ? crawlWebsiteMarkdown(extractedPlaceId, crawledWebsiteUrl, { enable_visual_analysis: true })
         : Promise.resolve({ success: false, error: 'No website URL' } as const),
     ]);
 
@@ -324,7 +335,8 @@ export async function action({ request }: ActionFunctionArgs) {
     return json(
       {
         success: true,
-        session_id: sessionId,
+        place_id: extractedPlaceId, // Primary identifier (from crawler or user input)
+        session_id: sessionId, // Deprecated - kept for backwards compatibility
         data: result.data, // Keep for CreateProjectDialog.tsx
         google_maps_markdown: googleMapsMarkdown,
         website_markdown: websiteMarkdown,

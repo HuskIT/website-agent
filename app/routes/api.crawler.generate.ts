@@ -5,7 +5,7 @@
  * This route generates AI-powered website content from extracted business data.
  *
  * POST /api/crawler/generate
- * Body: { session_id: string }
+ * Body: { place_id: string }
  *
  * See: specs/001-crawler-api-integration/
  */
@@ -49,30 +49,35 @@ export async function action({ request }: ActionFunctionArgs) {
     // Parse request body
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/naming-convention
-    const { session_id } = body as { session_id?: string };
+    const { place_id } = body as { place_id?: string };
 
-    // Validate required fields
-    if (!session_id || typeof session_id !== 'string') {
+    // Validate that place_id is provided
+    if (!place_id || typeof place_id !== 'string') {
       return json(
-        { error: { code: 'INVALID_INPUT', message: 'session_id is required and must be a string' } },
+        {
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'place_id is required',
+          },
+        },
         { status: 400 },
       );
     }
 
     // Log crawler configuration for debugging
     logger.info(`[API] Calling crawler API`, {
-      sessionId: session_id,
+      placeId: place_id,
       crawlerUrl: process.env.CRAWLER_API_URL || 'http://localhost:4999',
     });
 
-    // Call crawler API
+    // Call crawler API with place_id
     const startTime = Date.now();
-    const result = await generateWebsiteContent(session_id);
+    const result = await generateWebsiteContent(place_id);
     const duration = Date.now() - startTime;
 
     // Log the generation attempt
     logger.info(`[API] Crawler content generation`, {
-      sessionId: session_id,
+      placeId: place_id,
       userId: session.user.id,
       duration: `${duration}ms`,
       success: result.success,
@@ -145,7 +150,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
       // Generic/unknown error
       logger.error(`[API] Unknown crawler error`, {
-        sessionId: session_id,
+        placeId: place_id,
         error: result.error,
         statusCode,
       });
