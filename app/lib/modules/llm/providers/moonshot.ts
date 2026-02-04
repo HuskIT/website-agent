@@ -4,8 +4,10 @@ import type { IProviderSetting } from '~/types/model';
 import type { LanguageModelV1 } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 
-// Simple hash function that works in both browser and Node.js
-// Uses a fast non-cryptographic hash (djb2) - sufficient for device ID generation
+/*
+ * Simple hash function that works in both browser and Node.js
+ * Uses a fast non-cryptographic hash (djb2) - sufficient for device ID generation
+ */
 function simpleHash(str: string): string {
   let hash = 5381;
 
@@ -15,6 +17,7 @@ function simpleHash(str: string): string {
 
   // Convert to hex string and ensure it's 32 chars
   const hexHash = (hash >>> 0).toString(16);
+
   return hexHash.padStart(8, '0').repeat(4).slice(0, 32);
 }
 
