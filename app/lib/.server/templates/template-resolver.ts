@@ -66,16 +66,17 @@ let _fsAvailable: boolean | null = null;
  *
  * Returns false in Cloudflare Workers/Pages where fs is unavailable.
  * Caches the result after first check.
+ *
+ * Uses dynamic import() instead of require() so it works in both
+ * ESM (Vite/Remix dev) and CJS contexts.
  */
-export function canAccessFileSystem(): boolean {
+export async function canAccessFileSystem(): Promise<boolean> {
   if (_fsAvailable !== null) {
     return _fsAvailable;
   }
 
   try {
-    // Dynamic require - will fail in Cloudflare where fs is not available
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('fs/promises');
+    await import('fs/promises');
     _fsAvailable = true;
   } catch {
     _fsAvailable = false;
@@ -118,7 +119,9 @@ export async function resolveTemplate(
   logger.info(`[RESOLVE] Resolving template: ${templateName}`);
 
   // Try local zip first (if fs available and preferZip)
-  if (preferZip && canAccessFileSystem()) {
+  const fsAvailable = await canAccessFileSystem();
+
+  if (preferZip && fsAvailable) {
     const zipPath = getZipPath(templateName);
 
     try {
@@ -151,7 +154,7 @@ export async function resolveTemplate(
 
       // Otherwise continue to GitHub fallback
     }
-  } else if (preferZip && !canAccessFileSystem()) {
+  } else if (preferZip && !fsAvailable) {
     logger.debug('[RESOLVE] Filesystem not available, skipping zip check');
   }
 

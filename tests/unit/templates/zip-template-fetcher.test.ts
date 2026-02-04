@@ -179,14 +179,14 @@ describe('template-resolver', () => {
   });
 
   describe('canAccessFileSystem', () => {
-    it('returns true in Node.js environment', () => {
-      const result = canAccessFileSystem();
+    it('returns true in Node.js environment', async () => {
+      const result = await canAccessFileSystem();
       expect(result).toBe(true);
     });
 
-    it('caches the result', () => {
-      const result1 = canAccessFileSystem();
-      const result2 = canAccessFileSystem();
+    it('caches the result', async () => {
+      const result1 = await canAccessFileSystem();
+      const result2 = await canAccessFileSystem();
       expect(result1).toBe(result2);
     });
   });
