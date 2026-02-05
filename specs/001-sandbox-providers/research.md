@@ -441,3 +441,284 @@ function resolveProvider(user: User): 'webcontainer' | 'vercel' {
 | Feature flag | Env default + user override | ✅ `SANDBOX_VERCEL_ENABLED`, `SANDBOX_PROVIDER_DEFAULT` |
 
 All research questions resolved and implemented.
+
+---
+
+## 9. Live SDK Groundtruth (2026-02-05)
+
+Everything below was captured by running `sandbox-exploration.ts` against a real
+Vercel Sandbox (SDK v1.4.1, runtime `node22`).  Numbers are single-run samples;
+use them as order-of-magnitude references, not benchmarks.
+
+### 9.1 Auth
+
+Pass `{ token, teamId, projectId }` explicitly on every static/instance call.
+The SDK does **not** auto-read `VERCEL_TOKEN` from the environment — it only
+auto-resolves via `VERCEL_OIDC_TOKEN` (requires `vercel link` + `vercel env pull`).
+For server-side routes that already have the token, explicit creds are simplest.
+
+```typescript
+const CREDS = {
+  token:     process.env.VERCEL_TOKEN!,
+  teamId:    process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+await Sandbox.create({ ...CREDS, runtime: 'node22' });
+```
+
+### 9.2 Sandbox lifecycle & timing
+
+| Operation | Observed time | Notes |
+|-----------|--------------|-------|
+| `Sandbox.create()` | ~1.1 s | Status is `"pending"` immediately after |
+| First command after create | works fine | SDK waits internally; no manual polling needed |
+| `Sandbox.get()` reconnect | ~0.9 s | ~3× slower than docs claim (0.3 s) in practice |
+| `sandbox.snapshot()` | ~7.3 s | **Stops the sandbox.** Status becomes `"snapshotting"` |
+| `Sandbox.get()` after snapshot | succeeds | Returns status `"snapshotting"`, not an error |
+| `Sandbox.create({ source: snapshot })` | ~1.3 s | Warm start; same speed as cold create for small images |
+| `sandbox.stop()` | ~0.7 s | |
+| `Sandbox.get()` after stop | **succeeds** | Returns the sandbox object (status presumably `"stopped"`). Does NOT throw. |
+
+**Key gotcha**: `Sandbox.get()` does **not** throw after `stop()` or `snapshot()`.
+You must check `sandbox.status` explicitly if you need to know whether the sandbox
+is still usable.
+
+### 9.3 File operations
+
+```typescript
+// writeFiles – batch, Buffer content required
+await sandbox.writeFiles([
+  { path: 'hello.txt',         content: Buffer.from('Hello') },
+  { path: 'sub/nested.txt',    content: Buffer.from('Nested') },  // parent auto-created by writeFiles
+]);
+
+// readFileToBuffer – returns Buffer | null
+const buf = await sandbox.readFileToBuffer({ path: 'hello.txt' });  // Buffer
+const missing = await sandbox.readFileToBuffer({ path: 'nope.txt' }); // null
+
+// readFile – docs say ReadableStream; ACTUAL return is Node.js Readable
+const stream = await sandbox.readFile({ path: 'hello.txt' });
+// stream.constructor.name === "Readable"
+const chunks: Buffer[] = [];
+for await (const chunk of stream) chunks.push(chunk);
+const text = Buffer.concat(chunks).toString('utf-8');
+```
+
+**`writeFiles` auto-creates parent directories** — writing to `subdir/nested.txt`
+works without calling `mkDir('subdir')` first.
+
+#### mkDir behaviour (quirks)
+
+- Does **NOT** support recursive creation in a single call.
+  `mkDir('a/b')` fails with `file_error` if `a/` does not exist.
+- Must call sequentially: `mkDir('a')` then `mkDir('a/b')`.
+- Is **not idempotent**: calling `mkDir` on an existing directory throws
+  `file_error: … File exists`.
+- **Recommendation**: prefer `writeFiles` (which handles parents) over `mkDir`
+  wherever possible.  Only use `mkDir` for empty directories you actually need.
+
+### 9.4 Command execution
+
+#### Blocking (default)
+
+```typescript
+const result = await sandbox.runCommand({ cmd: 'node', args: ['--version'] });
+// result.exitCode  → 0
+// await result.stdout()  → "v22.22.0\n"
+// result.cmdId      → "cmd_c1f99d8c…"
+// result.cwd        → "/vercel/sandbox"   (default working directory)
+```
+
+#### With `cwd` and `env`
+
+```typescript
+const r = await sandbox.runCommand({
+  cmd: 'node',
+  args: ['-e', 'console.log(process.env.MY_VAR)'],
+  cwd: '/vercel/sandbox',
+  env:  { MY_VAR: 'hello' },
+});
+// stdout → "hello\n"
+```
+
+#### Detached + `logs()` streaming
+
+```typescript
+const cmd = await sandbox.runCommand({ cmd: 'node', args: ['-e', '…'], detached: true });
+// cmd.exitCode  → null  (not yet finished)
+
+for await (const entry of cmd.logs()) {
+  // entry.stream → "stdout" | "stderr"
+  // entry.data   → string (may contain multiple lines in one chunk)
+}
+
+const finished = await cmd.wait();
+// finished.exitCode → 0
+```
+
+**Ordering**: `logs()` does **not** guarantee interleaved stdout/stderr ordering.
+In practice stderr entries can arrive *before* stdout entries even when the
+process wrote stdout first.  Treat stdout and stderr as independent streams.
+
+**Chunking**: stdout lines are often batched into a single `logs()` entry
+(e.g. three `console.log` calls → one entry with `"line-1\nline-2\nline-3\n"`).
+Do not assume one entry per line.
+
+#### `output()` helper
+
+```typescript
+const r = await sandbox.runCommand({ cmd: 'node', args: ['-e', 'console.log("OUT"); console.error("ERR");'] });
+await r.output('both')   // "ERR\nOUT\n"  ← stderr first, unordered
+await r.output('stdout') // "OUT\n"
+await r.output('stderr') // "ERR\n"
+```
+
+#### Non-zero exit & command-not-found
+
+```typescript
+// process.exit(42)
+const r = await sandbox.runCommand({ cmd: 'node', args: ['-e', 'process.exit(42)'] });
+r.exitCode  // 42  (does NOT throw)
+
+// Binary not in PATH
+const r2 = await sandbox.runCommand({ cmd: 'nonexistent_binary_xyz' });
+r2.exitCode  // 255
+await r2.stderr()
+// 'time="…" level=error msg="exec failed: … executable file not found in $PATH"'
+```
+
+`runCommand` **never throws** on non-zero exit or missing binary.  Always check
+`exitCode`.
+
+#### Kill a detached command
+
+```typescript
+const cmd = await sandbox.runCommand({ cmd: '…', detached: true });
+// … collect some logs …
+await cmd.kill('SIGTERM');
+const result = await cmd.wait();
+result.exitCode  // 143  (128 + SIGTERM signal 15)
+```
+
+Signal 143 = 128 + 15 (SIGTERM).  `SIGKILL` would give 137.
+
+#### `getCommand()` – retrieve after the fact
+
+```typescript
+const cmd = await sandbox.getCommand(cmdId);
+// cmd.exitCode → populated if finished, null if still running
+```
+
+Works even after the command has exited.  Useful for reconnect scenarios.
+
+### 9.5 sudo
+
+```typescript
+const r = await sandbox.runCommand({ cmd: 'id', sudo: true });
+await r.stdout()  // "uid=0(root) gid=0(root) groups=0(root)\n"
+```
+
+`sudo: true` runs the command as root.  Default user is `vercel-sandbox`.
+
+### 9.6 Preview URLs via `domain()`
+
+```typescript
+// Port must be declared in ports[] at creation time
+const sandbox = await Sandbox.create({ ...CREDS, ports: [3000] });
+sandbox.domain(3000)  // "https://sb-<hash>.vercel.run"
+
+sandbox.domain(8080)  // throws: "No route for port 8080"
+```
+
+`domain()` is **synchronous** — no network call.  The URL is baked in at
+creation.  A server must actually be listening on that port for requests to
+succeed; the URL exists regardless.
+
+### 9.7 Timeout & extendTimeout
+
+```typescript
+sandbox.timeout  // 300000  (5 min, as requested at creation)
+
+await sandbox.extendTimeout(60_000);  // extend by 60 s
+
+// Must re-fetch to see updated value on the same object:
+const refreshed = await Sandbox.get({ ...CREDS, sandboxId: sandbox.sandboxId });
+refreshed.timeout  // 360000
+```
+
+The `timeout` accessor on an existing object is **stale** after `extendTimeout`.
+Always re-fetch via `Sandbox.get()` if you need the current value.
+
+### 9.8 Sandbox.list() shape
+
+```typescript
+const { json } = await Sandbox.list({ ...CREDS, limit: 5 });
+// json.sandboxes[0].sandboxId  → undefined  (not present in list summary!)
+// json.sandboxes[0].status     → "running" | "stopped" | …
+// json.sandboxes[0].createdAt  → number (unix ms), NOT a Date
+// json.pagination              → { count: 5, next: <unix-ms>, prev: <unix-ms> }
+```
+
+**`sandboxId` is missing from list summaries.**  Use `Sandbox.list()` only for
+status/time filtering.  To get a usable sandbox object you need to already know
+the ID.
+
+### 9.9 Snapshots — full lifecycle
+
+```typescript
+// 1. Create snapshot (stops the sandbox)
+const snap = await sandbox.snapshot();
+// snap.snapshotId      → "snap_8XBPSXP…"
+// snap.sourceSandboxId → the sandbox that was snapshotted
+// snap.status          → "created"
+// snap.sizeBytes       → 255001189  (~255 MB for bare node22 + a few files)
+// snap.createdAt       → Date
+// snap.expiresAt       → Date  (7 days later)
+
+// 2. Retrieve later
+const s = await Snapshot.get({ ...CREDS, snapshotId: snap.snapshotId });
+
+// 3. List snapshots
+const { json } = await Snapshot.list({ ...CREDS, limit: 5 });
+// json.snapshots[0].snapshotId  → present in list (unlike Sandbox.list)
+// json.snapshots[0].createdAt   → number (unix ms)
+
+// 4. Restore: create a new sandbox from snapshot
+const restored = await Sandbox.create({
+  ...CREDS,
+  source:  { type: 'snapshot', snapshotId: snap.snapshotId },
+  runtime: 'node22',
+  timeout: 180_000,
+});
+// All files written before the snapshot are present in the restored sandbox.
+// Directories created with mkDir are also preserved.
+
+// 5. Delete snapshot
+await snap.delete();
+// Snapshot.get() after delete returns an object with status "deleted"
+// (does NOT throw)
+```
+
+**Snapshot semantics**:
+- Captures filesystem + installed packages.  Everything in `/vercel/sandbox`.
+- The source sandbox becomes **unusable** after `snapshot()`.  Do not call
+  commands on it afterwards.
+- Snapshots expire after **7 days**.
+- A snapshot can be used to create **multiple** sandboxes.
+- Deleting a snapshot does not affect sandboxes already created from it.
+- `Snapshot.get()` after deletion returns `status: "deleted"` — does not throw.
+
+### 9.10 Corrections to existing VercelSandboxProvider
+
+Based on the groundtruth above, the following issues exist in the current
+`app/lib/sandbox/providers/vercel-sandbox.ts` and related routes:
+
+| Issue | Location | Fix needed |
+|-------|----------|------------|
+| `readFile` result consumed as web `ReadableStream` | `vercel-sandbox.ts` | It is a Node.js `Readable`. Use `for await…of` or pipe. |
+| `snapshot()` implemented as placeholder | `vercel-sandbox.ts` T042/T043 | SDK *does* support `sandbox.snapshot()` natively. Implement for real. |
+| `mkDir` called with nested path in one shot | Any consumer | Must create parents sequentially; or skip mkDir and use `writeFiles` (auto-creates parents). |
+| `Sandbox.get()` assumed to throw on stopped sandbox | `reconnect` route | It does not throw — check `status` field instead. |
+| `sandbox.timeout` read after `extendTimeout` | timeout-manager | Stale — must re-fetch via `Sandbox.get()`. |
+| `Sandbox.list()` result accessed as `.sandboxId` | any list consumer | `sandboxId` is `undefined` in list summary objects. |
+| `Snapshot.get()` assumed to throw after `delete()` | cleanup code | Returns `{ status: "deleted" }` instead. |

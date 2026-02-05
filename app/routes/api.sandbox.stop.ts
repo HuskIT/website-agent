@@ -5,12 +5,19 @@
  */
 
 import { json, type ActionFunctionArgs } from '@remix-run/node';
+import { Sandbox } from '@vercel/sandbox';
 import { getSession } from '~/lib/auth/session.server';
 import { getProjectById, updateProject } from '~/lib/services/projects.server';
 import { StopSandboxRequestSchema, type StopSandboxResponse } from '~/lib/sandbox/schemas';
 import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.stop');
+
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
 
 /**
  * POST /api/sandbox/stop
@@ -66,29 +73,49 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Sandbox does not belong to this project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
-    /*
-     * Note: Vercel Sandbox doesn't have a direct stop method in the SDK
-     * The sandbox will timeout automatically after the timeout period
-     * We can only clear the project reference to it
-     */
+    let snapshotId: string | null = null;
 
-    logger.info('Stopping sandbox (clearing project reference)', {
-      projectId,
-      sandboxId,
-      createSnapshot,
-    });
+    // Get the live sandbox
+    let sandbox;
 
-    // Clear sandbox info from project (use snake_case for DB columns)
+    try {
+      sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
+    } catch (_e) {
+      // Already gone – just clear DB and return success
+      logger.info('Sandbox already gone, clearing project reference', { projectId, sandboxId });
+    }
+
+    if (sandbox && sandbox.status !== 'stopped' && sandbox.status !== 'failed') {
+      if (createSnapshot) {
+        // snapshot() stops the sandbox automatically – no need to call stop() afterwards
+        try {
+          logger.info('Creating snapshot before stop', { projectId, sandboxId });
+
+          const snap = await sandbox.snapshot();
+          snapshotId = snap.snapshotId;
+          logger.info('Snapshot created', { projectId, sandboxId, snapshotId });
+        } catch (snapErr) {
+          // Snapshot failed – fall through to explicit stop
+          logger.warn('Snapshot before stop failed, calling stop()', { projectId, sandboxId, error: snapErr });
+          await sandbox.stop();
+        }
+      } else {
+        await sandbox.stop();
+      }
+    }
+
+    // Clear sandbox reference from project
     await updateProject(projectId, session.user.id, {
       sandbox_id: null,
       sandbox_provider: null,
       sandbox_expires_at: null,
     });
 
-    // Note: Vercel Sandbox doesn't have snapshot API yet, so snapshotId is always null
+    logger.info('Sandbox stopped', { projectId, sandboxId, snapshotId });
+
     const response: StopSandboxResponse = {
       success: true,
-      snapshotId: null,
+      snapshotId,
     };
 
     return json(response);

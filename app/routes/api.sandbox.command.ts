@@ -13,6 +13,13 @@ import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.command');
 
+// Vercel credentials – passed explicitly so SDK does not fall back to OIDC
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+
 /**
  * POST /api/sandbox/command
  *
@@ -85,11 +92,14 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Get sandbox instance
+    /*
+     * Get sandbox instance – Sandbox.get() does NOT throw on stopped sandboxes,
+     * so we check the status field explicitly after the call.
+     */
     let sandbox;
 
     try {
-      sandbox = await Sandbox.get({ sandboxId });
+      sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
     } catch {
       return new Response(JSON.stringify({ error: 'Sandbox not found or expired', code: 'SANDBOX_NOT_FOUND' }), {
         status: 404,
@@ -97,8 +107,8 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!sandbox || sandbox.status !== 'running') {
-      return new Response(JSON.stringify({ error: 'Sandbox not found or not running', code: 'SANDBOX_NOT_FOUND' }), {
+    if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
+      return new Response(JSON.stringify({ error: 'Sandbox not running', code: 'SANDBOX_NOT_RUNNING' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -112,7 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
       cwd,
     });
 
-    // Create SSE stream
+    // Create SSE stream – use detached mode so logs() streams output in real time
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
@@ -122,51 +132,45 @@ export async function action({ request }: ActionFunctionArgs) {
         };
 
         try {
-          // Create abort controller for timeout
           const abortController = new AbortController();
-          const timeoutId = setTimeout(() => abortController.abort(), timeout || 30000);
+          const timeoutId = timeout ? setTimeout(() => abortController.abort(), timeout) : null;
 
-          // Execute command
-          const execution = await sandbox.runCommand({
+          // Launch detached – returns immediately with a live Command object
+          const command = await sandbox.runCommand({
             cmd,
             args: args || [],
             cwd,
             env,
             sudo,
+            detached: true,
             signal: abortController.signal,
           });
 
-          clearTimeout(timeoutId);
-
-          // Get stdout and stderr (these are async methods)
-          const stdoutContent = await execution.stdout();
-          const stderrContent = await execution.stderr();
-
-          // Stream stdout
-          if (stdoutContent) {
-            sendEvent({
-              type: 'output',
-              stream: 'stdout',
-              data: stdoutContent,
-            });
+          // Stream log entries as they arrive (real-time)
+          try {
+            for await (const entry of command.logs()) {
+              sendEvent({
+                type: 'output',
+                stream: entry.stream as 'stdout' | 'stderr',
+                data: entry.data,
+              });
+            }
+          } catch {
+            // logs() may throw StreamError if sandbox stops mid-stream – handled below
           }
 
-          // Stream stderr
-          if (stderrContent) {
-            sendEvent({
-              type: 'output',
-              stream: 'stderr',
-              data: stderrContent,
-            });
+          // Wait for the command to finish and get the exit code
+          const finished = await command.wait();
+
+          if (timeoutId) {
+            clearTimeout(timeoutId);
           }
 
-          // Send exit event
           sendEvent({
             type: 'exit',
-            exitCode: execution.exitCode,
+            exitCode: finished.exitCode,
           });
 
-          // Send done marker
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (error) {

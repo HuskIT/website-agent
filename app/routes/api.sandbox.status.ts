@@ -13,6 +13,12 @@ import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.status');
 
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+
 /**
  * GET /api/sandbox/status
  *
@@ -67,26 +73,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ error: 'Sandbox does not belong to this project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
-    // Get sandbox status
+    // Get sandbox status – Sandbox.get() does not throw on stopped sandboxes
     try {
-      const sandbox = await Sandbox.get({ sandboxId });
-
-      if (!sandbox) {
-        return json({ error: 'Sandbox not found', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
-      }
+      const sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
 
       logger.debug('Got sandbox status', { projectId, sandboxId, status: sandbox.status });
 
       const response: GetSandboxStatusResponse = {
         sandboxId,
-        status: sandbox.status,
+        status: sandbox.status as GetSandboxStatusResponse['status'],
         timeout: sandbox.timeout,
         expiresAt: new Date(Date.now() + sandbox.timeout).toISOString(),
       };
 
       return json(response);
     } catch (_e) {
-      logger.info('Sandbox not found', { projectId, sandboxId });
+      logger.info('Sandbox not found (get threw)', { projectId, sandboxId });
 
       return json({ error: 'Sandbox not found or expired', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
     }

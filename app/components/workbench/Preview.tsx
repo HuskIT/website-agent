@@ -72,6 +72,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const activePreview = previews[activePreviewIndex];
   const [displayPath, setDisplayPath] = useState('/');
   const [iframeUrl, setIframeUrl] = useState<string | undefined>();
+  const [serverReady, setServerReady] = useState(true);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isInspectorMode, setIsInspectorMode] = useState(false);
   const [isDeviceModeOn, setIsDeviceModeOn] = useState(false);
@@ -102,14 +103,68 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
     if (!activePreview) {
       setIframeUrl(undefined);
       setDisplayPath('/');
+      setServerReady(true);
 
       return;
     }
 
-    const { baseUrl } = activePreview;
+    const { baseUrl, provider } = activePreview;
     setIframeUrl(baseUrl);
     setDisplayPath('/');
+
+    /*
+     * Vercel Sandbox domains are baked in at creation time via domain() but nothing
+     * listens on the port until the dev server actually starts inside the microVM.
+     * Poll until the server responds before loading the iframe.
+     * WebContainer already gates previews on its own server-ready event, so skip polling.
+     */
+    setServerReady(provider !== 'vercel');
   }, [activePreview]);
+
+  // Poll a Vercel preview URL until the server responds, then show the iframe.
+  useEffect(() => {
+    if (serverReady || !iframeUrl) {
+      return undefined;
+    }
+
+    // Capture in a local so the closure always has a string (guard above ensures it).
+    const targetUrl = iframeUrl;
+
+    let cancelled = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 90; // ~3 min at 2 s intervals
+
+    async function poll() {
+      if (cancelled || retryCount >= MAX_RETRIES) {
+        // Give up – let the iframe load so the user sees the real error.
+        if (!cancelled) {
+          setServerReady(true);
+        }
+
+        return;
+      }
+
+      try {
+        await fetch(targetUrl, { mode: 'no-cors', signal: AbortSignal.timeout(5000) });
+
+        if (!cancelled) {
+          setServerReady(true);
+        }
+      } catch {
+        retryCount += 1;
+
+        if (!cancelled) {
+          setTimeout(poll, 2000);
+        }
+      }
+    }
+
+    poll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [serverReady, iframeUrl]);
 
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {
@@ -1181,6 +1236,26 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                   });
                   return null;
                 })()}
+                {/* Waiting overlay – shown while polling for Vercel dev server */}
+                {!serverReady && (
+                  <div
+                    className="absolute inset-0 flex flex-col items-center justify-center z-20"
+                    style={{ background: 'var(--bolt-elements-bg-depth-1)' }}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-full animate-spin"
+                      style={{
+                        border: '2px solid var(--bolt-elements-textTertiary, #ccc)',
+                        borderTopColor: 'var(--bolt-elements-textPrimary, #333)',
+                      }}
+                    />
+                    <div className="text-bolt-elements-textSecondary text-sm font-medium mt-3">Starting server…</div>
+                    <div className="text-bolt-elements-textTertiary text-xs mt-1">
+                      Waiting for dev server to be ready
+                    </div>
+                  </div>
+                )}
+
                 {isDeviceModeOn && showDeviceFrameInPreview ? (
                   <div
                     className="device-wrapper"
@@ -1257,7 +1332,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                           background: 'white',
                           display: 'block',
                         }}
-                        src={iframeUrl}
+                        src={serverReady ? iframeUrl : undefined}
                         sandbox="allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin"
                         allow="cross-origin-isolated"
                       />
@@ -1268,7 +1343,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                     ref={iframeRef}
                     title="preview"
                     className="border-none w-full h-full bg-bolt-elements-background-depth-1"
-                    src={iframeUrl}
+                    src={serverReady ? iframeUrl : undefined}
                     sandbox="allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin"
                     allow="geolocation; ch-ua-full-version-list; cross-origin-isolated; screen-wake-lock; publickey-credentials-get; shared-storage-select-url; ch-ua-arch; bluetooth; compute-pressure; ch-prefers-reduced-transparency; deferred-fetch; usb; ch-save-data; publickey-credentials-create; shared-storage; deferred-fetch-minimal; run-ad-auction; ch-ua-form-factors; ch-downlink; otp-credentials; payment; ch-ua; ch-ua-model; ch-ect; autoplay; camera; private-state-token-issuance; accelerometer; ch-ua-platform-version; idle-detection; private-aggregation; interest-cohort; ch-viewport-height; local-fonts; ch-ua-platform; midi; ch-ua-full-version; xr-spatial-tracking; clipboard-read; gamepad; display-capture; keyboard-map; join-ad-interest-group; ch-width; ch-prefers-reduced-motion; browsing-topics; encrypted-media; gyroscope; serial; ch-rtt; ch-ua-mobile; window-management; unload; ch-dpr; ch-prefers-color-scheme; ch-ua-wow64; attribution-reporting; fullscreen; identity-credentials-get; private-state-token-redemption; hid; ch-ua-bitness; storage-access; sync-xhr; ch-device-memory; ch-viewport-width; picture-in-picture; magnetometer; clipboard-write; microphone"
                   />

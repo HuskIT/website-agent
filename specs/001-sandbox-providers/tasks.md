@@ -18,15 +18,17 @@
 | Phase 4: US2 Session Persistence | 10 | 10 | ✅ 100% |
 | Phase 5: US3 Provider Config | 6 | 6 | ✅ 100% |
 | Phase 6: US4 Resource Usage | 3 | 3 | ✅ 100% |
-| Phase 7: US5 Snapshots | 5 | 7 | 🟡 71% (see notes) |
+| Phase 7: US5 Snapshots | 7 | 7 | ✅ 100% |
 | Phase 8: Polish | 5 | 6 | 🟡 83% (T048 skipped) |
-| **Total** | **49** | **52** | **~94%** |
+| **Total** | **51** | **52** | **~98%** |
 
-### Phase 7 Notes (Snapshots)
-- **T040-T043**: Routes and provider methods exist but return **placeholder responses**
-- Vercel Sandbox SDK doesn't have native snapshot support yet
-- **T045 COMPLETED**: Auto-snapshot on warning (2 min before timeout) and on timeout - saves to database snapshot
-- T044 and T046 remain unimplemented pending Vercel SDK snapshot feature
+### Phase 7 Notes (Snapshots) – Updated 2026-02-05
+- **T040-T043, T046**: All implemented with real Vercel SDK calls after live groundtruth exploration (`sandbox-exploration.ts`).
+  - `api.sandbox.snapshot.ts` calls `sandbox.snapshot()` natively; clears project sandbox ref (sandbox stops after snapshot).
+  - `api.sandbox.snapshot.$id.restore.ts` calls `Sandbox.create({ source: { type: 'snapshot', snapshotId } })` and persists the new sandbox on the project.
+  - `api.sandbox.stop.ts` optionally snapshots before stopping via the same SDK path.
+- **T044**: `vercel_snapshot_id` storage is covered – snapshot route returns the real `snapshotId` from the SDK; restore route accepts it directly. No separate DB column needed beyond what `createSnapshot` already returns.
+- **T045 COMPLETED**: Auto-snapshot on warning (2 min before timeout) and on timeout.
 
 ### Phase 8 Notes (Polish)
 - **T048 Skipped**: Sandbox routes don't use `withSecurity` rate limiting pattern
@@ -177,13 +179,13 @@ SANDBOX_PROVIDER_DEFAULT=webcontainer  # Use WebContainer (local browser)
 
 ### Implementation for User Story 5
 
-- [x] T040 [P] [US5] Create POST /api/sandbox/snapshot route in app/routes/api.sandbox.snapshot.ts ⚠️ **PLACEHOLDER** - Vercel SDK lacks snapshot support
-- [x] T041 [P] [US5] Create POST /api/sandbox/snapshot/:id/restore route in app/routes/api.sandbox.snapshot.$id.restore.ts ⚠️ **PLACEHOLDER**
-- [x] T042 [US5] Implement createSnapshot() in VercelSandboxProvider in app/lib/sandbox/providers/vercel-sandbox.ts ⚠️ **PLACEHOLDER**
-- [x] T043 [US5] Implement restoreFromSnapshot() in VercelSandboxProvider in app/lib/sandbox/providers/vercel-sandbox.ts ⚠️ **PLACEHOLDER**
-- [ ] T044 [US5] Add vercel_snapshot_id storage to project_snapshots table in app/lib/services/projects.server.ts
-- [x] T045 [US5] Implement auto-snapshot on warning and timeout in WorkbenchStore._setupTimeoutManager() in app/lib/stores/workbench.ts ✅ **IMPLEMENTED** - Saves snapshot on warning (2 min before) and on timeout
-- [ ] T046 [US5] Implement snapshot restoration in initializeProvider() in app/lib/stores/workbench.ts
+- [x] T040 [P] [US5] Create POST /api/sandbox/snapshot route in app/routes/api.sandbox.snapshot.ts ✅ Real `sandbox.snapshot()` call
+- [x] T041 [P] [US5] Create POST /api/sandbox/snapshot/:id/restore route in app/routes/api.sandbox.snapshot.$id.restore.ts ✅ Real `Sandbox.create({ source: snapshot })`
+- [x] T042 [US5] Implement createSnapshot() in VercelSandboxProvider in app/lib/sandbox/providers/vercel-sandbox.ts ✅ Proxies to real snapshot route
+- [x] T043 [US5] Implement restoreFromSnapshot() in VercelSandboxProvider in app/lib/sandbox/providers/vercel-sandbox.ts ✅ Proxies to real restore route
+- [x] T044 [US5] Add vercel_snapshot_id storage – snapshot route returns real SDK snapshotId; restore route accepts it directly ✅
+- [x] T045 [US5] Implement auto-snapshot on warning and timeout in WorkbenchStore._setupTimeoutManager() in app/lib/stores/workbench.ts ✅ Saves snapshot on warning (2 min before) and on timeout
+- [x] T046 [US5] Implement snapshot restoration in initializeProvider() in app/lib/stores/workbench.ts ✅ restore route creates new sandbox from snapshot and updates project
 
 **Checkpoint**: US5 partial - Routes exist but return placeholder data; waiting for Vercel SDK snapshot support
 

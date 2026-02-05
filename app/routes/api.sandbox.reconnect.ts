@@ -13,6 +13,12 @@ import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.reconnect');
 
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+
 /**
  * POST /api/sandbox/reconnect
  *
@@ -67,42 +73,47 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Sandbox does not belong to this project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
-    // Try to reconnect to existing sandbox
+    /*
+     * Try to reconnect to existing sandbox.
+     * Sandbox.get() does NOT throw on stopped/snapshotting sandboxes – check status explicitly.
+     */
+    let sandbox;
+
     try {
-      const sandbox = await Sandbox.get({ sandboxId });
-
-      if (!sandbox || sandbox.status !== 'running') {
-        return json({ error: 'Sandbox session expired or stopped', code: 'SANDBOX_NOT_RUNNING' }, { status: 404 });
-      }
-
-      // Get preview URLs for each port
-      const previewUrls: Record<number, string> = {};
-
-      for (const port of ports) {
-        try {
-          previewUrls[port] = sandbox.domain(port);
-        } catch {
-          // Port not exposed, skip
-        }
-      }
-
-      logger.info('Reconnected to sandbox', { projectId, sandboxId });
-
-      const response: ReconnectSandboxResponse = {
-        success: true,
-        sandboxId,
-        status: 'running',
-        previewUrls,
-        timeout: sandbox.timeout,
-        connectedAt: new Date().toISOString(),
-      };
-
-      return json(response);
+      sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
     } catch (_e) {
-      logger.info('Sandbox not found', { projectId, sandboxId });
-
+      logger.info('Sandbox not found (get threw)', { projectId, sandboxId });
       return json({ error: 'Sandbox session not found or expired', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
     }
+
+    if (sandbox.status === 'stopped' || sandbox.status === 'failed' || sandbox.status === 'snapshotting') {
+      logger.info('Sandbox no longer usable', { projectId, sandboxId, status: sandbox.status });
+      return json({ error: 'Sandbox session expired or stopped', code: 'SANDBOX_NOT_RUNNING' }, { status: 404 });
+    }
+
+    // Get preview URLs for each port
+    const previewUrls: Record<number, string> = {};
+
+    for (const port of ports) {
+      try {
+        previewUrls[port] = sandbox.domain(port);
+      } catch {
+        // Port not exposed, skip
+      }
+    }
+
+    logger.info('Reconnected to sandbox', { projectId, sandboxId, status: sandbox.status });
+
+    const response: ReconnectSandboxResponse = {
+      success: true,
+      sandboxId,
+      status: sandbox.status as 'pending' | 'running',
+      previewUrls,
+      timeout: sandbox.timeout,
+      connectedAt: new Date().toISOString(),
+    };
+
+    return json(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('Failed to reconnect to sandbox', { error: message });

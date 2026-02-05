@@ -13,6 +13,12 @@ import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.files');
 
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+
 /**
  * POST /api/sandbox/files
  *
@@ -67,17 +73,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Sandbox does not belong to project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
-    // Get sandbox instance
+    // Get sandbox instance – writeFiles works on both pending and running sandboxes
     let sandbox;
 
     try {
-      sandbox = await Sandbox.get({ sandboxId });
+      sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
     } catch {
       return json({ error: 'Sandbox not found or expired', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
     }
 
-    if (!sandbox || sandbox.status !== 'running') {
-      return json({ error: 'Sandbox not found or not running', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
+    if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
+      return json({ error: 'Sandbox is stopped', code: 'SANDBOX_NOT_RUNNING' }, { status: 404 });
     }
 
     // Prepare files for writing (SDK expects Array<{ path: string; content: Buffer }>)

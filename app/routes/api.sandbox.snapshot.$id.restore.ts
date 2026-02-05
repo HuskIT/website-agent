@@ -6,12 +6,19 @@
  */
 
 import { json, type ActionFunctionArgs } from '@remix-run/node';
+import { Sandbox, Snapshot } from '@vercel/sandbox';
 import { getSession } from '~/lib/auth/session.server';
-import { getProjectById } from '~/lib/services/projects.server';
+import { getProjectById, updateProject } from '~/lib/services/projects.server';
 import { RestoreSnapshotRequestSchema, type RestoreSnapshotResponse } from '~/lib/sandbox/schemas';
 import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.snapshot.restore');
+
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
 
 /**
  * POST /api/sandbox/snapshot/:id/restore
@@ -71,27 +78,68 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: 'Project not found', code: 'NOT_FOUND' }, { status: 404 });
     }
 
-    /*
-     * Note: Vercel Sandbox SDK doesn't have native snapshot support yet
-     * This is a placeholder for future implementation
-     */
-    logger.info('Restoring snapshot (placeholder - Vercel snapshots not yet supported)', {
-      projectId,
-      snapshotId,
-      useVercelSnapshot,
-    });
+    logger.info('Restoring sandbox from snapshot', { projectId, snapshotId, useVercelSnapshot });
 
-    // Return placeholder response
-    const response: RestoreSnapshotResponse = {
-      success: true,
-      sandboxId: `sb_${Date.now()}`,
-      restoredFrom: 'files_backup',
-      previewUrls: {
-        3000: 'https://placeholder.vercel.app',
-      },
-    };
+    if (useVercelSnapshot) {
+      // Verify the snapshot still exists and is valid
+      let snapshot;
 
-    return json(response);
+      try {
+        snapshot = await Snapshot.get({ ...VERCEL_CREDS, snapshotId });
+      } catch (_e) {
+        return json({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }, { status: 404 });
+      }
+
+      // Snapshot.get() returns { status: "deleted" } instead of throwing after deletion
+      if (snapshot.status === 'deleted' || snapshot.status === 'failed') {
+        return json({ error: 'Snapshot is no longer available', code: 'SNAPSHOT_EXPIRED' }, { status: 404 });
+      }
+
+      // Create a new sandbox from the snapshot – this is the fast-start path
+      const sandbox = await Sandbox.create({
+        ...VERCEL_CREDS,
+        source: { type: 'snapshot', snapshotId },
+        runtime: 'node22',
+        timeout: 5 * 60 * 1000, // 5 min default
+        ports: [3000, 5173],
+      });
+
+      // Collect preview URLs for exposed ports
+      const previewUrls: Record<number, string> = {};
+
+      for (const port of [3000, 5173]) {
+        try {
+          previewUrls[port] = sandbox.domain(port);
+        } catch {
+          // Port not exposed, skip
+        }
+      }
+
+      // Persist the new sandbox reference on the project
+      await updateProject(projectId, session.user.id, {
+        sandbox_id: sandbox.sandboxId,
+        sandbox_provider: 'vercel',
+        sandbox_expires_at: new Date(Date.now() + sandbox.timeout),
+      });
+
+      logger.info('Sandbox restored from snapshot', {
+        projectId,
+        snapshotId,
+        newSandboxId: sandbox.sandboxId,
+      });
+
+      const response: RestoreSnapshotResponse = {
+        success: true,
+        sandboxId: sandbox.sandboxId,
+        restoredFrom: 'vercel_snapshot',
+        previewUrls,
+      };
+
+      return json(response);
+    }
+
+    // Fallback: no Vercel snapshot – caller should use writeFiles to populate
+    return json({ error: 'Non-Vercel restore not supported via this route', code: 'UNSUPPORTED' }, { status: 501 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('Failed to restore snapshot', { error: message });

@@ -89,14 +89,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Project not found', code: 'NOT_FOUND' }, { status: 404 });
     }
 
-    // Check if there's an existing sandbox session
+    /*
+     * Check if there's an existing sandbox session.
+     * Sandbox.get() does NOT throw on stopped sandboxes – check status explicitly.
+     */
     if (project.sandbox_id) {
-      // Try to reconnect first
       try {
-        const existingSandbox = await Sandbox.get({ sandboxId: project.sandbox_id });
+        const existingSandbox = await Sandbox.get({
+          sandboxId: project.sandbox_id,
+          token: VERCEL_TOKEN,
+          teamId: VERCEL_TEAM_ID,
+          projectId: VERCEL_PROJECT_ID,
+        });
 
-        if (existingSandbox && existingSandbox.status === 'running') {
-          // Return existing sandbox info
+        if (existingSandbox.status === 'running' || existingSandbox.status === 'pending') {
           const previewUrls: Record<number, string> = {};
 
           for (const port of ports) {
@@ -107,18 +113,29 @@ export async function action({ request }: ActionFunctionArgs) {
             }
           }
 
-          logger.info('Reconnected to existing sandbox', { projectId, sandboxId: project.sandbox_id });
+          logger.info('Reconnected to existing sandbox', {
+            projectId,
+            sandboxId: project.sandbox_id,
+            status: existingSandbox.status,
+          });
 
           return json({
             sandboxId: project.sandbox_id,
-            status: 'running',
+            status: existingSandbox.status as 'pending' | 'running',
             previewUrls,
-            timeout,
+            timeout: existingSandbox.timeout,
             createdAt: new Date().toISOString(),
           } satisfies CreateSandboxResponse);
         }
+
+        // Sandbox exists but is stopped/snapshotting – fall through to create a new one
+        logger.info('Existing sandbox no longer usable, creating new', {
+          projectId,
+          oldSandboxId: project.sandbox_id,
+          status: existingSandbox.status,
+        });
       } catch (_e) {
-        // Existing sandbox not found, create new one
+        // Sandbox.get threw – truly gone
         logger.info('Existing sandbox not found, creating new', { projectId, oldSandboxId: project.sandbox_id });
       }
     }

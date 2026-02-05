@@ -317,11 +317,23 @@ export class VercelSandboxProvider implements SandboxProvider {
   }
 
   /**
-   * Create a directory
+   * Create a directory.
+   * Uses shell `mkdir` via runCommand because the Vercel SDK's mkDir() is
+   * non-recursive and throws on existing directories.  `mkdir -p` handles both.
+   * NOTE: prefer writeFiles() for file creation – it auto-creates parent dirs.
    */
   async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-    // Create directory by running mkdir command
-    await this.runCommand('mkdir', options?.recursive ? ['-p', path] : [path]);
+    const result = await this.runCommand('mkdir', options?.recursive ? ['-p', path] : [path]);
+
+    // mkdir without -p exits 1 when dir already exists – treat as success
+    if (result.exitCode !== 0 && !options?.recursive) {
+      if (result.stderr.includes('File exists')) {
+        // Already exists – not an error
+      } else {
+        throw new Error(`mkdir failed (exit ${result.exitCode}): ${result.stderr}`);
+      }
+    }
+
     this._emitFileChange({ type: 'add_dir', path });
   }
 
@@ -340,23 +352,100 @@ export class VercelSandboxProvider implements SandboxProvider {
    */
 
   /**
-   * Run a command and wait for completion
+   * Run a command and wait for completion.
+   * Collects stdout/stderr from streaming output and captures the exitCode
+   * from the SSE 'exit' event emitted by the server route.
    */
   async runCommand(cmd: string, args: string[] = [], opts?: CommandOptions): Promise<CommandResult> {
-    let stdout = '';
-    let stderr = '';
-    const exitCode = -1;
-
-    for await (const output of this.runCommandStreaming(cmd, args, opts)) {
-      if (output.stream === 'stdout') {
-        stdout += output.data;
-      } else {
-        stderr += output.data;
-      }
+    if (!this._sandboxId || !this._config) {
+      throw new Error('Sandbox not connected');
     }
 
-    // The exit code is embedded in the last output or we need to get it from the stream
-    return { exitCode: exitCode === -1 ? 0 : exitCode, stdout, stderr };
+    let stdout = '';
+    let stderr = '';
+    let exitCode = 0;
+
+    const response = await fetch('/api/sandbox/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: this._config.projectId,
+        sandboxId: this._sandboxId,
+        cmd,
+        args,
+        cwd: opts?.cwd,
+        env: opts?.env,
+        timeout: opts?.timeout,
+        sudo: opts?.sudo,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as { error?: string };
+      throw new Error(errorData.error || 'Failed to run command');
+    }
+
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) {
+            continue;
+          }
+
+          const data = line.slice(6);
+
+          if (data === '[DONE]') {
+            continue;
+          }
+
+          try {
+            const event: CommandSSEEvent = JSON.parse(data);
+
+            if (event.type === 'output') {
+              if (event.stream === 'stdout') {
+                stdout += event.data;
+              } else {
+                stderr += event.data;
+              }
+            } else if (event.type === 'exit') {
+              exitCode = event.exitCode;
+            } else if (event.type === 'error') {
+              throw new Error(event.message);
+            }
+          } catch (_e) {
+            if (_e instanceof Error && _e.message !== '') {
+              throw _e; // re-throw deliberate errors from 'error' events
+            }
+
+            // otherwise: malformed SSE chunk, skip
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return { exitCode, stdout, stderr };
   }
 
   /**

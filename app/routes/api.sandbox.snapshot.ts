@@ -6,12 +6,19 @@
  */
 
 import { json, type ActionFunctionArgs } from '@remix-run/node';
+import { Sandbox } from '@vercel/sandbox';
 import { getSession } from '~/lib/auth/session.server';
-import { getProjectById } from '~/lib/services/projects.server';
+import { getProjectById, updateProject } from '~/lib/services/projects.server';
 import { CreateSnapshotRequestSchema, type CreateSnapshotResponse } from '~/lib/sandbox/schemas';
 import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.snapshot');
+
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
 
 /**
  * POST /api/sandbox/snapshot
@@ -67,24 +74,48 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Sandbox does not belong to this project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
+    // Get the live sandbox – Sandbox.get() does not throw on stopped sandboxes
+    let sandbox;
+
+    try {
+      sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
+    } catch (_e) {
+      return json({ error: 'Sandbox not found', code: 'SANDBOX_NOT_FOUND' }, { status: 404 });
+    }
+
+    if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
+      return json({ error: 'Sandbox is not running – cannot snapshot', code: 'SANDBOX_NOT_RUNNING' }, { status: 409 });
+    }
+
+    logger.info('Creating snapshot via Vercel SDK', { projectId, sandboxId, summary });
+
     /*
-     * Note: Vercel Sandbox SDK doesn't have native snapshot support yet
-     * We create a placeholder response that stores metadata in our database
+     * snapshot() captures the full filesystem + packages.
+     * IMPORTANT: the sandbox stops automatically after this call.
      */
-    logger.info('Creating snapshot (placeholder - Vercel snapshots not yet supported)', {
-      projectId,
-      sandboxId,
-      summary,
+    const snapshot = await sandbox.snapshot();
+
+    // Clear the project's sandbox reference – it is no longer usable
+    await updateProject(projectId, session.user.id, {
+      sandbox_id: null,
+      sandbox_provider: null,
+      sandbox_expires_at: null,
     });
 
-    // Return placeholder response
+    logger.info('Snapshot created', {
+      projectId,
+      sandboxId,
+      snapshotId: snapshot.snapshotId,
+      sizeBytes: snapshot.sizeBytes,
+    });
+
     const response: CreateSnapshotResponse = {
-      snapshotId: `snap_${Date.now()}`,
-      vercelSnapshotId: null, // Not supported yet
-      sizeBytes: 0,
-      filesCount: 0,
-      createdAt: new Date().toISOString(),
-      expiresAt: null,
+      snapshotId: snapshot.snapshotId,
+      vercelSnapshotId: snapshot.snapshotId,
+      sizeBytes: snapshot.sizeBytes,
+      filesCount: 0, // Vercel SDK does not expose a file count
+      createdAt: snapshot.createdAt.toISOString(),
+      expiresAt: snapshot.expiresAt.toISOString(),
     };
 
     return json(response);

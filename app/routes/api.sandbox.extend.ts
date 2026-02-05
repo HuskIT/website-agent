@@ -13,6 +13,12 @@ import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.extend');
 
+const VERCEL_CREDS = {
+  token: process.env.VERCEL_TOKEN!,
+  teamId: process.env.VERCEL_TEAM_ID!,
+  projectId: process.env.VERCEL_PROJECT_ID!,
+};
+
 /**
  * POST /api/sandbox/extend
  *
@@ -67,30 +73,31 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Sandbox does not belong to this project', code: 'FORBIDDEN' }, { status: 403 });
     }
 
-    // Get sandbox and extend timeout
+    // Get sandbox and extend timeout via SDK
     try {
-      const sandbox = await Sandbox.get({ sandboxId });
+      const sandbox = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
 
-      if (!sandbox || sandbox.status !== 'running') {
+      if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
         return json({ error: 'Sandbox not running', code: 'SANDBOX_NOT_RUNNING' }, { status: 404 });
       }
 
-      /*
-       * Extend timeout by updating the sandbox
-       * Note: Vercel Sandbox SDK doesn't have a direct extend method,
-       * so we update the timeout through the project record
-       */
-      const newExpiresAt = new Date(Date.now() + duration);
+      // Call the real SDK method – extends the microVM timeout server-side
+      await sandbox.extendTimeout(duration);
 
+      // sandbox.timeout is stale after extendTimeout; re-fetch to get the real value
+      const refreshed = await Sandbox.get({ ...VERCEL_CREDS, sandboxId });
+      const newExpiresAt = new Date(Date.now() + refreshed.timeout);
+
+      // Keep our DB record in sync
       await updateProject(projectId, session.user.id, {
         sandbox_expires_at: newExpiresAt,
       });
 
-      logger.info('Extended sandbox timeout', { projectId, sandboxId, duration });
+      logger.info('Extended sandbox timeout', { projectId, sandboxId, duration, newTimeout: refreshed.timeout });
 
       const response: ExtendTimeoutResponse = {
         success: true,
-        newTimeout: duration,
+        newTimeout: refreshed.timeout,
         expiresAt: newExpiresAt.toISOString(),
       };
 

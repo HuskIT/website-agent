@@ -733,13 +733,34 @@ export class WorkbenchStore {
       const fileCount = Object.keys(snapshot.files).length;
       logger.info(`Restoring ${fileCount} files from snapshot`, { projectId, snapshotUpdatedAt: snapshot.updated_at });
 
+      // Pause FileSyncManager so createFile calls don't trigger debounced micro-batches
+      const syncManager = this.#fileSyncManager;
+
+      if (syncManager) {
+        this.#filesStore.setFileSyncManager(null);
+      }
+
       for (const [path, fileData] of Object.entries(snapshot.files)) {
         await this.#filesStore.createFile(path, fileData.content);
       }
 
-      // Sync restored files to Vercel if connected
-      if (this.#fileSyncManager) {
-        await this.#fileSyncManager.flushWrites();
+      // Re-attach FileSyncManager for subsequent live edits
+      if (syncManager) {
+        this.#filesStore.setFileSyncManager(syncManager);
+      }
+
+      // Write all files to sandbox in a single batch
+      if (this.#sandboxProvider) {
+        const allFiles = Object.entries(snapshot.files).map(([path, fileData]) => ({
+          path,
+          content: Buffer.from(fileData.content),
+        }));
+
+        await this.#sandboxProvider.writeFiles(allFiles);
+        logger.info('Single-batch file upload complete', { projectId, fileCount });
+
+        // Fire-and-forget: install deps + start dev server
+        this.#autoStartDevServer(snapshot.files);
       }
 
       logger.info('Snapshot restored successfully', { projectId, fileCount });
@@ -748,6 +769,77 @@ export class WorkbenchStore {
     } catch (error) {
       logger.error('Failed to restore from snapshot', { error, projectId });
       return false;
+    }
+  }
+
+  /**
+   * Parse package.json from snapshot files, run npm install, then fire-and-forget
+   * the dev server. Vite projects get `-- --host` so the server binds to 0.0.0.0
+   * (required for Vercel Sandbox port proxying).
+   */
+  async #autoStartDevServer(files: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
+    const provider = this.#sandboxProvider;
+
+    if (!provider) {
+      return;
+    }
+
+    const pkgRaw = files['package.json'];
+
+    if (!pkgRaw) {
+      logger.warn('[autoStartDevServer] No package.json in snapshot – skipping auto-start');
+      return;
+    }
+
+    let pkg: { scripts?: Record<string, string> };
+
+    try {
+      pkg = JSON.parse(pkgRaw.content);
+    } catch {
+      logger.warn('[autoStartDevServer] Failed to parse package.json – skipping auto-start');
+      return;
+    }
+
+    const scripts = pkg.scripts || {};
+
+    // Pick the best run script: dev > start
+    const scriptName = scripts.dev ? 'dev' : scripts.start ? 'start' : null;
+
+    if (!scriptName) {
+      logger.warn('[autoStartDevServer] No dev or start script found – skipping auto-start');
+      return;
+    }
+
+    logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
+
+    try {
+      // Await install so dependencies are available before starting the server
+      const installResult = await provider.runCommand('npm', ['install', '--no-audit', '--no-fund', '--silent']);
+
+      if (installResult.exitCode !== 0) {
+        logger.error('[autoStartDevServer] npm install failed', {
+          exitCode: installResult.exitCode,
+          stderr: installResult.stderr,
+        });
+        return;
+      }
+
+      logger.info('[autoStartDevServer] npm install succeeded, starting server…');
+
+      /*
+       * Determine if this is a Vite project – if so, append --host so the dev
+       * server binds to 0.0.0.0 (needed for Vercel Sandbox port proxy).
+       */
+      const isVite = (scripts[scriptName] || '').includes('vite');
+      const devArgs = isVite ? ['-c', `npm run ${scriptName} -- --host`] : ['-c', `npm run ${scriptName}`];
+
+      /*
+       * Fire-and-forget: do NOT await – dev servers run indefinitely.
+       * The preview polling in Preview.tsx will detect when the port is ready.
+       */
+      provider.runCommand('sh', devArgs);
+    } catch (error) {
+      logger.error('[autoStartDevServer] Error during auto-start', { error });
     }
   }
 
