@@ -7,6 +7,7 @@
  * Provider is set via SANDBOX_PROVIDER_DEFAULT env var.
  */
 
+import { useStore } from '@nanostores/react';
 import { classNames } from '~/utils/classNames';
 import { workbenchStore } from '~/lib/stores/workbench';
 import type { SandboxProviderType } from '~/lib/sandbox/types';
@@ -34,8 +35,25 @@ const PROVIDER_CONFIG: Record<
 };
 
 export function ProviderBadge({ className }: ProviderBadgeProps) {
+  const loadingStatus = useStore(workbenchStore.loadingStatus);
   const currentProvider = workbenchStore.currentProviderType;
   const config = PROVIDER_CONFIG[currentProvider];
+
+  if (loadingStatus) {
+    return (
+      <div
+        className={classNames(
+          'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border animate-pulse',
+          'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/30',
+          className,
+        )}
+        title="Initializing sandbox..."
+      >
+        <div className="i-ph:spinner animate-spin" />
+        <span>{loadingStatus}</span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -48,6 +66,7 @@ export function ProviderBadge({ className }: ProviderBadgeProps) {
     >
       <div className={config.icon} />
       <span>{config.label}</span>
+      {/* <div className="i-ph:caret-down text-[10px] opacity-50 block md:hidden" /> */}
     </div>
   );
 }

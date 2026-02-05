@@ -40,6 +40,7 @@ const DEFAULT_CONFIG: Required<FileSyncConfig> = {
  * and the sandbox provider, handling batching, debouncing, and error recovery.
  */
 export class FileSyncManager {
+  private _instanceId = Math.random().toString(36).substring(7);
   private _provider: SandboxProvider | null = null;
   private _config: Required<FileSyncConfig>;
   private _state: FileSyncState = {
@@ -101,6 +102,10 @@ export class FileSyncManager {
     this._pendingContent.set(path, content);
 
     // Debounce the actual sync
+    console.log(`[FileSyncManager] queueWrite called for ${path}`, {
+      pendingCount: this._state.pendingWrites.length,
+      hasProvider: !!this._provider,
+    });
     this._scheduleSync();
   }
 
@@ -184,7 +189,7 @@ export class FileSyncManager {
   }
 
   private async _performSync(): Promise<void> {
-    console.log('[FileSyncManager] _performSync called', {
+    console.log(`[FileSyncManager:${this._instanceId}] _performSync called`, {
       hasProvider: !!this._provider,
       pendingWrites: this._state.pendingWrites.length,
       providerStatus: this._provider?.status,
@@ -249,6 +254,14 @@ export class FileSyncManager {
         // Remove from syncing
         this._state.syncing = this._state.syncing.filter((p) => !batch.includes(p));
         this._notifyStateChange();
+
+        // If there are more pending files, process them immediately (no debounce)
+        if (this._state.pendingWrites.length > 0) {
+          console.log('[FileSyncManager] More files pending, processing next batch immediately', {
+            remaining: this._state.pendingWrites.length,
+          });
+          setTimeout(() => this._performSync(), 0);
+        }
 
         return;
       } catch (error) {

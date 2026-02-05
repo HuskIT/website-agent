@@ -320,7 +320,7 @@ export const Workbench = memo(
       const timeoutManager = workbenchStore.timeoutManager;
 
       if (!timeoutManager) {
-        return () => {};
+        return undefined;
       }
 
       const unsubscribe = timeoutManager.onStateChange((state) => {

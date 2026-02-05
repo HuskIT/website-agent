@@ -100,32 +100,51 @@ export class ActionRunner {
    * Get the active SandboxProvider if available and connected, otherwise null.
    * Dynamically checks provider status to handle async connection timing.
    */
-  #getProvider(): SandboxProvider | null {
+  async #getProvider(): Promise<SandboxProvider | null> {
     const provider = getProviderInstance();
 
-    console.log('[ActionRunner] #getProvider check', {
-      hasInstance: !!provider,
-      type: provider?.type,
-      status: provider?.status,
-      sandboxId: provider?.sandboxId,
-    });
+    // Check if provider exists and is a Vercel Sandbox
+    if (provider && provider.type === 'vercel') {
+      // If connected, return immediately
+      if (provider.status === 'connected') {
+        return provider;
+      }
 
-    /*
-     * Only use provider if it's a Vercel sandbox that's connected
-     * This allows commands to route to cloud even if ActionRunner was created before connection
-     */
-    if (provider && provider.type === 'vercel' && provider.status === 'connected') {
-      console.log('[ActionRunner] Using Vercel provider for shell command');
-      return provider;
-    }
+      // If connecting or reconnecting, wait for it
+      if (provider.status === 'connecting' || provider.status === 'reconnecting') {
+        console.log('[ActionRunner] Provider connecting, waiting...');
 
-    if (provider) {
-      console.log('[ActionRunner] Provider not usable:', {
-        type: provider.type,
-        status: provider.status,
-        reason:
-          provider.type !== 'vercel' ? 'not-vercel' : provider.status !== 'connected' ? 'not-connected' : 'unknown',
-      });
+        try {
+          // Wait up to 5 seconds for connection
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              cleanup();
+              reject(new Error('Provider connection timeout'));
+            }, 5000);
+
+            const cleanup = provider.onStatusChange((status) => {
+              if (status === 'connected') {
+                cleanup();
+                clearTimeout(timeout);
+                resolve();
+              } else if (status === 'disconnected' || status === 'error') {
+                cleanup();
+                clearTimeout(timeout);
+                reject(new Error(`Provider failed to connect: ${status}`));
+              }
+            });
+          });
+
+          // Re-check status after wait
+          const currentProvider = getProviderInstance();
+
+          if (currentProvider && currentProvider.status === 'connected') {
+            return currentProvider;
+          }
+        } catch (error) {
+          console.warn('[ActionRunner] Failed to wait for provider connection:', error);
+        }
+      }
     }
 
     return null;
@@ -308,7 +327,7 @@ export class ActionRunner {
     }
 
     // Try to use provider abstraction if available (Vercel Sandbox)
-    const provider = this.#getProvider();
+    const provider = await this.#getProvider();
 
     // Debug logging for provider routing
     console.log('[ActionRunner] Shell action routing check', {
@@ -471,56 +490,13 @@ export class ActionRunner {
       unreachable('Expected file action');
     }
 
-    // Try to use provider abstraction if available
-    const provider = this.#getProvider();
-
-    if (provider && provider.status === 'connected') {
-      try {
-        const normalizedPath = action.filePath.startsWith('/') ? action.filePath.slice(1) : action.filePath;
-
-        // Mark file as recently saved
-        this.#onMarkRecentlySaved?.(normalizedPath, 1000);
-
-        // Use provider to write file (handles mkdir automatically)
-        await provider.writeFile(normalizedPath, action.content);
-        logger.debug(`File written via provider ${normalizedPath}`);
-
-        return;
-      } catch (error) {
-        logger.warn('Provider file write failed, falling back to WebContainer', error);
-
-        // Fall through to WebContainer
-      }
-    }
-
-    // Fallback to WebContainer
-    const webcontainer = await this.#webcontainer;
-    const normalizedPath = action.filePath.startsWith('/') ? action.filePath.slice(1) : action.filePath;
-    const absolutePath = nodePath.join(webcontainer.workdir, normalizedPath);
-    const relativePath = nodePath.relative(webcontainer.workdir, absolutePath);
-
-    let folder = nodePath.dirname(relativePath);
-
-    // remove trailing slashes
-    folder = folder.replace(/\/+$/g, '');
-
-    if (folder !== '.') {
-      try {
-        await webcontainer.fs.mkdir(folder, { recursive: true });
-        logger.debug('Created folder', folder);
-      } catch (error) {
-        logger.error('Failed to create folder\n\n', error);
-      }
-    }
-
     try {
-      // Mark file as recently saved to prevent file watcher from overwriting with stale content
-      this.#onMarkRecentlySaved?.(relativePath, 1000);
-
-      await webcontainer.fs.writeFile(relativePath, action.content);
-      logger.debug(`File written ${relativePath}`);
+      // Use FilesStore to save file (handles optimistic updates, cloud sync, and local fallback)
+      const { workbenchStore } = await import('~/lib/stores/workbench');
+      logger.info('[ActionRunner] Calling saveFile', { filePath: action.filePath });
+      await workbenchStore.filesStore.saveFile(action.filePath, action.content);
     } catch (error) {
-      logger.error('Failed to write file\n\n', error);
+      logger.error('Failed to run file action\n\n', error);
     }
   }
 
@@ -529,7 +505,7 @@ export class ActionRunner {
       unreachable('Expected edit action');
     }
 
-    const provider = this.#getProvider();
+    const provider = await this.#getProvider();
     const useProvider = provider && provider.status === 'connected';
     const webcontainer = useProvider ? null : await this.#webcontainer;
 
@@ -630,11 +606,8 @@ export class ActionRunner {
       }
 
       if (applied > 0 && currentContent !== fileContent) {
-        if (useProvider && provider) {
-          await provider.writeFile(relativePath, currentContent);
-        } else if (webcontainer) {
-          await webcontainer.fs.writeFile(relativePath, currentContent);
-        }
+        const { workbenchStore } = await import('~/lib/stores/workbench');
+        await workbenchStore.filesStore.saveFile(filePath, currentContent);
 
         logger.info(`Edited ${filePath}: ${applied} edits applied`);
       }
@@ -660,7 +633,7 @@ export class ActionRunner {
 
   async getFileHistory(filePath: string): Promise<FileHistory | null> {
     try {
-      const provider = this.#getProvider();
+      const provider = await this.#getProvider();
       const historyPath = this.#getHistoryPath(filePath);
 
       if (provider && provider.status === 'connected') {
@@ -716,7 +689,7 @@ export class ActionRunner {
     });
 
     // Try to use provider abstraction if available (Vercel Sandbox)
-    const provider = this.#getProvider();
+    const provider = await this.#getProvider();
     let exitCode: number | undefined;
     let output = '';
 

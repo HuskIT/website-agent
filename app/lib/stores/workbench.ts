@@ -27,6 +27,62 @@ import { TimeoutManager, type TimeoutManagerConfig } from '~/lib/sandbox/timeout
 const { saveAs } = fileSaver;
 const logger = createScopedLogger('WorkbenchStore');
 
+/**
+ * Chunk files into batches under maxChunkSize bytes.
+ * Used for Vercel Sandbox uploads (4MB limit).
+ */
+function createChunksStrict(
+  files: Array<{ path: string; content: Buffer; size: number }>,
+  maxChunkSize: number,
+): Array<Array<{ path: string; content: Buffer }>> {
+  const chunks: Array<Array<{ path: string; content: Buffer }>> = [];
+  let currentChunk: Array<{ path: string; content: Buffer }> = [];
+  let currentSize = 0;
+
+  for (const file of files) {
+    if (files.indexOf(file) === 0) {
+      console.log('[DEBUG createChunks] 🔒 Conservative Chunking Active: Max 20 files');
+    }
+
+    // If single file exceeds limit, upload it alone (will likely fail but we try)
+    if (file.size > maxChunkSize) {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+        currentSize = 0;
+      }
+
+      chunks.push([{ path: file.path, content: file.content }]);
+      continue;
+    }
+
+    /*
+     * If adding this file would exceed limit OR file count limit (20), start new chunk
+     * Vercel Sandbox sometimes chokes on too many file handles at once
+     */
+    const MAX_FILES_PER_CHUNK = 20;
+
+    if (
+      (currentSize + file.size > maxChunkSize || currentChunk.length >= MAX_FILES_PER_CHUNK) &&
+      currentChunk.length > 0
+    ) {
+      chunks.push(currentChunk);
+      currentChunk = [];
+      currentSize = 0;
+    }
+
+    currentChunk.push({ path: file.path, content: file.content });
+    currentSize += file.size;
+  }
+
+  // Don't forget the last chunk
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
 export interface ArtifactState {
   id: string;
   title: string;
@@ -75,6 +131,13 @@ export class WorkbenchStore {
     import.meta.hot?.data.supabaseAlert ?? atom<SupabaseAlert | undefined>(undefined);
   deployAlert: WritableAtom<DeployAlert | undefined> =
     import.meta.hot?.data.deployAlert ?? atom<DeployAlert | undefined>(undefined);
+
+  /**
+   * Status of the initial project load sequence.
+   * null = ready / not loading
+   */
+  loadingStatus: WritableAtom<string | null> = import.meta.hot?.data.loadingStatus ?? atom<string | null>(null);
+
   modifiedFiles = new Set<string>();
   artifactIdList: string[] = [];
   #globalExecutionQueue = Promise.resolve();
@@ -145,6 +208,10 @@ export class WorkbenchStore {
     return this.#sandboxProvider;
   }
 
+  get filesStore(): FilesStore {
+    return this.#filesStore;
+  }
+
   get fileSyncManager(): FileSyncManager | null {
     return this.#fileSyncManager;
   }
@@ -198,6 +265,8 @@ export class WorkbenchStore {
     this.#currentUserId = userId;
     this.#currentProviderType = providerType;
 
+    this.loadingStatus.set('Initializing...');
+
     // Create new provider
     logger.info('Initializing sandbox provider', { providerType, projectId });
 
@@ -215,7 +284,7 @@ export class WorkbenchStore {
 
     // Set up FileSyncManager for cloud providers
     if (providerType === 'vercel') {
-      this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 100 });
+      this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 300 });
       this.#fileSyncManager.setProvider(provider);
       this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
@@ -379,7 +448,7 @@ export class WorkbenchStore {
           this.#sandboxProvider = provider;
 
           // Set up FileSyncManager
-          this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 100 });
+          this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 300 });
           this.#fileSyncManager.setProvider(provider);
           this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
@@ -392,19 +461,32 @@ export class WorkbenchStore {
           this._setupTimeoutManager(provider, projectId, effectiveUserId);
 
           /*
-           * CONSISTENCY FIX: Sync local files to Supabase after reconnect
-           * This ensures Supabase snapshot matches the current workspace state.
-           * If the sandbox expires later, we'll have the latest state saved.
+           * CRITICAL: Restore files from database snapshot even on reconnect
+           * This ensures all files are uploaded to the sandbox with proper chunking
            */
-          this.saveSnapshotToDatabase()
-            .then(() => {
-              logger.info('Snapshot synced to Supabase after reconnect');
-            })
-            .catch((error) => {
-              logger.warn('Failed to sync snapshot after reconnect', { error });
+          try {
+            const restored = await this.restoreFromDatabaseSnapshot();
 
-              // Non-fatal - continue with the session
+            if (restored) {
+              logger.info('Files restored from snapshot after reconnect');
+            } else {
+              // No snapshot to restore, just sync current state
+              this.saveSnapshotToDatabase()
+                .then(() => {
+                  logger.info('Snapshot synced to Supabase after reconnect');
+                })
+                .catch((error) => {
+                  logger.warn('Failed to sync snapshot after reconnect', { error });
+                });
+            }
+          } catch (restoreError) {
+            logger.warn('Failed to restore from snapshot after reconnect', restoreError);
+
+            // Fall back to saving current state
+            this.saveSnapshotToDatabase().catch((error) => {
+              logger.warn('Failed to sync snapshot after reconnect', { error });
             });
+          }
 
           return { success: true, provider, restored: true };
         } else {
@@ -415,6 +497,10 @@ export class WorkbenchStore {
         }
       } catch (error) {
         logger.error('Error reconnecting to sandbox', { error, sandboxId });
+      } finally {
+        if (!this.#sandboxProvider) {
+          this.loadingStatus.set(null);
+        }
       }
     }
 
@@ -436,7 +522,11 @@ export class WorkbenchStore {
           logger.warn('Failed to restore from snapshot', restoreError);
 
           // Continue without restoration - not fatal
+        } finally {
+          this.loadingStatus.set(null);
         }
+      } else {
+        this.loadingStatus.set(null);
       }
 
       return { success: true, provider, restored: false };
@@ -702,6 +792,10 @@ export class WorkbenchStore {
     }
 
     logger.info('Restoring from database snapshot', { projectId });
+    this.loadingStatus.set('Restoring Files...');
+
+    // Declare here to be accessible in finally block
+    let savedFileSyncManager: FileSyncManager | null = null;
 
     try {
       const response = await fetch(`/api/projects/${projectId}/snapshot`);
@@ -733,34 +827,136 @@ export class WorkbenchStore {
       const fileCount = Object.keys(snapshot.files).length;
       logger.info(`Restoring ${fileCount} files from snapshot`, { projectId, snapshotUpdatedAt: snapshot.updated_at });
 
-      // Pause FileSyncManager so createFile calls don't trigger debounced micro-batches
-      const syncManager = this.#fileSyncManager;
+      // DEBUG: Log state before any operations
+      console.log('[DEBUG restoreFromDatabaseSnapshot] Starting restore:', {
+        projectId,
+        fileCount,
+        hasSandboxProvider: !!this.#sandboxProvider,
+        hasFileSyncManager: !!this.#fileSyncManager,
+      });
 
-      if (syncManager) {
+      // Isolate FileSyncManager to prevent micro-batch uploads during restore
+      savedFileSyncManager = this.#fileSyncManager;
+
+      if (this.#fileSyncManager) {
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Flushing and disabling FileSyncManager');
+        await this.#fileSyncManager.flushWrites();
+        this.#fileSyncManager = null;
         this.#filesStore.setFileSyncManager(null);
       }
 
-      for (const [path, fileData] of Object.entries(snapshot.files)) {
-        await this.#filesStore.createFile(path, fileData.content);
+      /*
+       * Populate the file store directly — bypasses createFile which awaits
+       * WebContainer boot and is unnecessary when using a Vercel sandbox.
+       * Build parent-folder entries so the file-tree UI renders correctly.
+       */
+      const fileMap: Record<
+        string,
+        { type: 'file'; content: string; isBinary: boolean; isLocked: boolean } | { type: 'folder' }
+      > = {};
+
+      for (const [filePath, fileData] of Object.entries(snapshot.files)) {
+        // Ensure every ancestor directory exists in the map
+        const parts = filePath.split('/');
+
+        for (let i = 1; i < parts.length; i++) {
+          const dirPath = parts.slice(0, i).join('/');
+
+          if (!fileMap[dirPath]) {
+            fileMap[dirPath] = { type: 'folder' };
+          }
+        }
+
+        fileMap[filePath] = { type: 'file', content: fileData.content, isBinary: fileData.isBinary, isLocked: false };
       }
 
-      // Re-attach FileSyncManager for subsequent live edits
-      if (syncManager) {
-        this.#filesStore.setFileSyncManager(syncManager);
-      }
+      this.#filesStore.files.set(fileMap);
+      logger.info('File store populated from snapshot', { projectId, fileCount });
 
-      // Write all files to sandbox in a single batch
+      // DEBUG: Log provider state before upload
+      console.log('[DEBUG restoreFromDatabaseSnapshot] Provider state:', {
+        hasSandboxProvider: !!this.#sandboxProvider,
+        providerType: this.#sandboxProvider?.type,
+        providerStatus: this.#sandboxProvider?.status,
+        sandboxId: this.#sandboxProvider?.sandboxId,
+        hasFileSyncManager: !!this.#fileSyncManager,
+      });
+
+      // Write all files to sandbox in chunked batches (Vercel has 4MB limit)
       if (this.#sandboxProvider) {
-        const allFiles = Object.entries(snapshot.files).map(([path, fileData]) => ({
-          path,
-          content: Buffer.from(fileData.content),
-        }));
+        // Prepare files with CORRECT base64 decoding
+        const filesWithSizes = Object.entries(snapshot.files).map(([filePath, fileData]) => {
+          const contentBuffer = Buffer.from(fileData.content, 'base64');
+          return {
+            path: filePath,
+            content: contentBuffer,
+            size: contentBuffer.length,
+          };
+        });
 
-        await this.#sandboxProvider.writeFiles(allFiles);
-        logger.info('Single-batch file upload complete', { projectId, fileCount });
+        const chunks = createChunksStrict(filesWithSizes, 512 * 1024);
+
+        this.loadingStatus.set(`Syncing to Sandbox (v3 - Fresh, ${chunks.length} batches)...`);
+
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Starting chunked upload:', {
+          totalFiles: filesWithSizes.length,
+          chunkCount: chunks.length,
+          firstChunkFiles: chunks[0]?.length,
+        });
+
+        // Upload chunks sequentially
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const chunkSize = chunk.reduce((sum, f) => sum + f.content.length, 0);
+
+          console.log(
+            `[DEBUG restoreFromDatabaseSnapshot] Uploading chunk ${i + 1}/${chunks.length} (${chunk.length} files, ~${(chunkSize / 1024 / 1024).toFixed(4)}MB)`,
+          );
+
+          try {
+            await this.#sandboxProvider.writeFiles(chunk);
+            console.log(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
+
+            /*
+             * Add a substantial delay between chunks (1 second)
+             * This prevents "bursty" traffic that might trigger rate limiters or race conditions
+             */
+            if (i < chunks.length - 1) {
+              console.log(`[DEBUG restoreFromDatabaseSnapshot] Waiting 1s before next chunk...`);
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              console.log(`[DEBUG restoreFromDatabaseSnapshot] Resumed after wait.`);
+            }
+          } catch (writeError) {
+            console.error(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} FAILED:`, writeError);
+            throw writeError;
+          }
+        }
+
+        logger.info('Chunked file upload complete', { projectId, fileCount, chunks: chunks.length });
+        console.log('[DEBUG restoreFromDatabaseSnapshot] All chunks uploaded successfully');
+
+        // Verify upload by counting files in sandbox
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Verifying upload with find command');
+
+        try {
+          const findResult = await this.#sandboxProvider.runCommand('find', ['.', '-type', 'f']);
+          const uploadedFileCount = findResult.stdout.split('\n').filter((line) => line.trim()).length;
+          console.log(
+            '[DEBUG restoreFromDatabaseSnapshot] Files in sandbox:',
+            uploadedFileCount,
+            'Expected:',
+            fileCount,
+          );
+        } catch (findError) {
+          console.warn('[DEBUG restoreFromDatabaseSnapshot] find command failed:', findError);
+        }
 
         // Fire-and-forget: install deps + start dev server
-        this.#autoStartDevServer(snapshot.files);
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Calling #autoStartDevServer');
+        this.loadingStatus.set('Starting Preview...');
+        await this.#autoStartDevServer(snapshot.files);
+      } else {
+        console.warn('[DEBUG restoreFromDatabaseSnapshot] SKIPPED upload: sandboxProvider is null');
       }
 
       logger.info('Snapshot restored successfully', { projectId, fileCount });
@@ -768,7 +964,23 @@ export class WorkbenchStore {
       return true;
     } catch (error) {
       logger.error('Failed to restore from snapshot', { error, projectId });
+      this.loadingStatus.set(null);
+
+      this.actionAlert.set({
+        type: 'error',
+        title: 'Restore Failed',
+        description: 'Failed to restore files from snapshot. Some files may be missing.',
+        content: error instanceof Error ? error.message : String(error),
+      });
+
       return false;
+    } finally {
+      // ALWAYS restore FileSyncManager, even if restore fails
+      if (savedFileSyncManager) {
+        this.#fileSyncManager = savedFileSyncManager;
+        this.#filesStore.setFileSyncManager(savedFileSyncManager);
+        console.log('[DEBUG restoreFromDatabaseSnapshot] FileSyncManager restored (in finally)');
+      }
     }
   }
 
@@ -778,18 +990,27 @@ export class WorkbenchStore {
    * (required for Vercel Sandbox port proxying).
    */
   async #autoStartDevServer(files: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
+    console.log('[DEBUG #autoStartDevServer] Starting auto-start process');
+
     const provider = this.#sandboxProvider;
 
     if (!provider) {
+      console.warn('[DEBUG #autoStartDevServer] No provider available');
       return;
     }
+
+    console.log('[DEBUG #autoStartDevServer] Provider available:', { type: provider.type, status: provider.status });
 
     const pkgRaw = files['package.json'];
 
     if (!pkgRaw) {
       logger.warn('[autoStartDevServer] No package.json in snapshot – skipping auto-start');
+      console.warn('[DEBUG #autoStartDevServer] No package.json found');
+
       return;
     }
+
+    console.log('[DEBUG #autoStartDevServer] Found package.json');
 
     let pkg: { scripts?: Record<string, string> };
 
@@ -811,20 +1032,32 @@ export class WorkbenchStore {
     }
 
     logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
+    console.log('[DEBUG #autoStartDevServer] About to run npm install');
 
     try {
       // Await install so dependencies are available before starting the server
+      console.log('[DEBUG #autoStartDevServer] Calling provider.runCommand for npm install...');
+
       const installResult = await provider.runCommand('npm', ['install', '--no-audit', '--no-fund', '--silent']);
+      console.log('[DEBUG #autoStartDevServer] npm install completed:', { exitCode: installResult.exitCode });
 
       if (installResult.exitCode !== 0) {
         logger.error('[autoStartDevServer] npm install failed', {
           exitCode: installResult.exitCode,
           stderr: installResult.stderr,
         });
+        console.error('[DEBUG #autoStartDevServer] npm install failed:', {
+          exitCode: installResult.exitCode,
+          stderr: installResult.stderr,
+        });
+
         return;
       }
 
+      console.log('[DEBUG #autoStartDevServer] npm install succeeded');
+
       logger.info('[autoStartDevServer] npm install succeeded, starting server…');
+      console.log('[DEBUG #autoStartDevServer] npm install succeeded, starting dev server');
 
       /*
        * Determine if this is a Vite project – if so, append --host so the dev
@@ -833,13 +1066,17 @@ export class WorkbenchStore {
       const isVite = (scripts[scriptName] || '').includes('vite');
       const devArgs = isVite ? ['-c', `npm run ${scriptName} -- --host`] : ['-c', `npm run ${scriptName}`];
 
+      console.log('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
+
       /*
        * Fire-and-forget: do NOT await – dev servers run indefinitely.
        * The preview polling in Preview.tsx will detect when the port is ready.
        */
       provider.runCommand('sh', devArgs);
+      console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
     } catch (error) {
       logger.error('[autoStartDevServer] Error during auto-start', { error });
+      console.error('[DEBUG #autoStartDevServer] Error during auto-start:', error);
     }
   }
 
@@ -1130,7 +1367,7 @@ export class WorkbenchStore {
 
   async createFile(filePath: string, content: string | Uint8Array = '') {
     try {
-      const success = await this.#filesStore.createFile(filePath, content);
+      const success = await this.#filesStore.saveFile(filePath, content);
 
       if (success) {
         this.setSelectedFile(filePath);

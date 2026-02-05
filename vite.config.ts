@@ -7,10 +7,12 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import * as dotenv from 'dotenv';
 
 // Load environment variables from multiple files
+// Load environment variables from multiple files
 dotenv.config({ path: '.env.local' });
 dotenv.config({ path: '.env' });
 dotenv.config();
 
+// FORCE CACHE INVALIDATION: v3
 export default defineConfig((config) => {
   return {
     define: {
