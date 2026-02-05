@@ -7,7 +7,6 @@
  * Based on specs/001-phase1-plan/data-model.md
  */
 
-/* eslint-disable @typescript-eslint/naming-convention */
 // PascalCase is the standard convention for Zod schema exports
 
 import { z } from 'zod';

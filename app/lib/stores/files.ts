@@ -20,6 +20,7 @@ import {
   clearCache,
 } from '~/lib/persistence/lockedFiles';
 import { getCurrentChatId } from '~/utils/fileLocks';
+import type { FileSyncManager } from '~/lib/sandbox/file-sync';
 
 const logger = createScopedLogger('FilesStore');
 
@@ -107,6 +108,12 @@ export class FilesStore {
   #recentlySavedFiles: Set<string> = new Set();
 
   /**
+   * FileSyncManager for syncing file changes to cloud sandbox provider.
+   * When set, file operations will also sync through this manager.
+   */
+  #fileSyncManager: FileSyncManager | null = null;
+
+  /**
    * Map of files that matches the state of WebContainer.
    */
   files: MapStore<FileMap> = import.meta.hot?.data.files ?? map({});
@@ -164,6 +171,24 @@ export class FilesStore {
     }
 
     this.#init();
+  }
+
+  /**
+   * Set the FileSyncManager for syncing file changes to cloud sandbox provider.
+   * When set, file save operations will also sync through this manager.
+   * @param manager The FileSyncManager instance or null to disable syncing
+   */
+  setFileSyncManager(manager: FileSyncManager | null): void {
+    this.#fileSyncManager = manager;
+    logger.info('FileSyncManager', manager ? 'connected' : 'disconnected');
+  }
+
+  /**
+   * Get the current FileSyncManager instance.
+   * @returns The current FileSyncManager or null if not set
+   */
+  getFileSyncManager(): FileSyncManager | null {
+    return this.#fileSyncManager;
   }
 
   /**
@@ -654,6 +679,14 @@ export class FilesStore {
         isLocked,
       });
 
+      // Sync to cloud provider if FileSyncManager is connected
+      if (this.#fileSyncManager) {
+        console.log('[FilesStore] queueWrite to FileSyncManager', { relativePath, contentLength: content.length });
+        this.#fileSyncManager.queueWrite(relativePath, content);
+      } else {
+        console.log('[FilesStore] NO FileSyncManager - file NOT synced to cloud', { relativePath });
+      }
+
       logger.info('File updated', {
         relativePath,
         contentLength: content.length,
@@ -939,6 +972,14 @@ export class FilesStore {
         });
 
         this.#modifiedFiles.set(relativePath, content as string);
+      }
+
+      // Sync to cloud provider if FileSyncManager is connected
+      if (this.#fileSyncManager) {
+        const syncContent = isBinary
+          ? Buffer.from(content as Uint8Array).toString('base64')
+          : (content as string) || ' ';
+        this.#fileSyncManager.queueWrite(relativePath, syncContent);
       }
 
       logger.info(`File created: ${relativePath}`);

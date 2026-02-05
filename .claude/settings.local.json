@@ -68,7 +68,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(grep:*)",
-      "mcp__nia__nia_research"
+      "mcp__nia__nia_research",
+      "Bash(echo:*)",
+      "Bash(/Users/linhng/Documents/HyperPage-MVP/website-agent/tests/sandbox-test-runner.sh)",
+      "Bash(test:*)",
+      "Bash(./tests/sandbox-mvp-verify.sh:*)",
+      "Bash(npx:*)"
     ],
     "deny": [],
     "ask": []

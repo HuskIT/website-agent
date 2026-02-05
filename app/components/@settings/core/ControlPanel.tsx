@@ -31,6 +31,7 @@ import AmplifyTab from '~/components/@settings/tabs/amplify/AmplifyTab';
 import CloudProvidersTab from '~/components/@settings/tabs/providers/cloud/CloudProvidersTab';
 import LocalProvidersTab from '~/components/@settings/tabs/providers/local/LocalProvidersTab';
 import McpTab from '~/components/@settings/tabs/mcp/McpTab';
+import SandboxTab from '~/components/@settings/tabs/sandbox/SandboxTab';
 
 interface ControlPanelProps {
   open: boolean;
@@ -157,6 +158,8 @@ export const ControlPanel = ({ open, onClose }: ControlPanelProps) => {
         return <EventLogsTab />;
       case 'mcp':
         return <McpTab />;
+      case 'sandbox':
+        return <SandboxTab />;
 
       default:
         return null;

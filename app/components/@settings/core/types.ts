@@ -19,7 +19,8 @@ export type TabType =
   | 'cloudflare'
   | 'amplify'
   | 'event-logs'
-  | 'mcp';
+  | 'mcp'
+  | 'sandbox';
 
 export type WindowType = 'user' | 'developer';
 
@@ -85,6 +86,7 @@ export const TAB_LABELS: Record<TabType, string> = {
   amplify: 'AWS Amplify',
   'event-logs': 'Event Logs',
   mcp: 'MCP Servers',
+  sandbox: 'Sandbox',
 };
 
 export const categoryLabels: Record<SettingCategory, string> = {
@@ -114,5 +116,6 @@ export interface Profile {
     theme?: 'light' | 'dark' | 'system';
     language?: string;
     timezone?: string;
+    sandboxProvider?: 'webcontainer' | 'vercel';
   };
 }

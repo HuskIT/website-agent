@@ -19,6 +19,10 @@ import Cookies from 'js-cookie';
 import { createSampler } from '~/utils/sampler';
 import type { ActionAlert, DeployAlert, SupabaseAlert } from '~/types/actions';
 import { createScopedLogger } from '~/utils/logger';
+import type { SandboxProvider, SandboxProviderType } from '~/lib/sandbox/types';
+import { createSandboxProvider, resolveProviderType } from '~/lib/sandbox';
+import { FileSyncManager } from '~/lib/sandbox/file-sync';
+import { TimeoutManager, type TimeoutManagerConfig } from '~/lib/sandbox/timeout-manager';
 
 const { saveAs } = fileSaver;
 const logger = createScopedLogger('WorkbenchStore');
@@ -43,6 +47,20 @@ export class WorkbenchStore {
   #filesStore = new FilesStore(webcontainer);
   #editorStore = new EditorStore(this.#filesStore);
   #terminalStore = new TerminalStore(webcontainer);
+
+  // Sandbox provider support (001-sandbox-providers)
+  #sandboxProvider: SandboxProvider | null = null;
+  #fileSyncManager: FileSyncManager | null = null;
+  #timeoutManager: TimeoutManager | null = null;
+
+  // Project state for reconnection
+  #currentProjectId: string | null = null;
+  #currentUserId: string | null = null;
+  #currentProviderType: SandboxProviderType = 'webcontainer';
+
+  // Snapshot conflict detection (multi-tab safety)
+  #sessionStartedAt: number = Date.now();
+  #lastKnownSnapshotUpdatedAt: string | null = null;
 
   #reloadedMessages = new Set<string>();
 
@@ -115,6 +133,622 @@ export class WorkbenchStore {
       .map((artifact) => artifact.runner.waitForCompletion());
 
     await Promise.all(runnerPromises);
+  }
+
+  /*
+   * ============================================================================
+   * Sandbox Provider Methods (001-sandbox-providers)
+   * ============================================================================
+   */
+
+  get sandboxProvider(): SandboxProvider | null {
+    return this.#sandboxProvider;
+  }
+
+  get fileSyncManager(): FileSyncManager | null {
+    return this.#fileSyncManager;
+  }
+
+  get timeoutManager(): TimeoutManager | null {
+    return this.#timeoutManager;
+  }
+
+  get currentProjectId(): string | null {
+    return this.#currentProjectId;
+  }
+
+  get currentProviderType(): SandboxProviderType {
+    return this.#currentProviderType;
+  }
+
+  /**
+   * Initialize the sandbox provider for the current project.
+   * This wires up the provider to FilesStore (via FileSyncManager) and PreviewsStore.
+   *
+   * @param providerType - The type of provider to use ('webcontainer' or 'vercel')
+   * @param projectId - The project ID for sandbox association
+   * @param userId - The user ID for authentication
+   * @param snapshotId - Optional snapshot ID to restore from
+   * @returns The initialized provider instance
+   */
+  async initializeProvider(
+    providerType: SandboxProviderType,
+    projectId: string,
+    userId: string,
+    snapshotId?: string,
+  ): Promise<SandboxProvider> {
+    // Disconnect existing provider if any
+    if (this.#sandboxProvider) {
+      logger.info('Disconnecting existing sandbox provider');
+
+      // Stop timeout manager
+      if (this.#timeoutManager) {
+        this.#timeoutManager.stop();
+        this.#timeoutManager = null;
+      }
+
+      await this.#sandboxProvider.disconnect();
+      this.#sandboxProvider = null;
+      this.#fileSyncManager = null;
+      this.#filesStore.setFileSyncManager(null);
+    }
+
+    // Track current project state
+    this.#currentProjectId = projectId;
+    this.#currentUserId = userId;
+    this.#currentProviderType = providerType;
+
+    // Create new provider
+    logger.info('Initializing sandbox provider', { providerType, projectId });
+
+    const provider = await createSandboxProvider(providerType, {
+      projectId,
+      userId,
+      snapshotId,
+      workdir: '/home/project',
+      timeout: 5 * 60 * 1000, // 5 minutes default
+      ports: [3000, 5173],
+      runtime: 'node22',
+    });
+
+    this.#sandboxProvider = provider;
+
+    // Set up FileSyncManager for cloud providers
+    if (providerType === 'vercel') {
+      this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 100 });
+      this.#fileSyncManager.setProvider(provider);
+      this.#filesStore.setFileSyncManager(this.#fileSyncManager);
+
+      // Listen for preview ready events
+      provider.onPreviewReady((port, url) => {
+        logger.info('Preview ready', { port, url });
+        this.#previewsStore.registerPreview(port, url, 'vercel');
+      });
+
+      // Set up timeout management for Vercel
+      this._setupTimeoutManager(provider, projectId, userId);
+    }
+
+    // Listen for file changes from provider (sync back to store)
+    provider.onFileChange((event) => {
+      logger.debug('File change from provider', event);
+
+      /*
+       * Note: The store already updates via WebContainer watcher for local
+       * For cloud, we might need to sync back here in future
+       */
+    });
+
+    logger.info('Sandbox provider initialized', { providerType, sandboxId: provider.sandboxId });
+
+    return provider;
+  }
+
+  /**
+   * Disconnect the current sandbox provider.
+   * Saves a snapshot before disconnecting for faster restoration.
+   */
+  async disconnectProvider(saveSnapshot: boolean = true): Promise<void> {
+    if (this.#sandboxProvider) {
+      logger.info('Disconnecting sandbox provider', { saveSnapshot });
+
+      // Save snapshot before disconnecting (for Vercel only)
+      if (saveSnapshot && this.#sandboxProvider.type === 'vercel' && this.#currentProjectId) {
+        try {
+          await this.saveSnapshotToDatabase();
+          logger.info('Snapshot saved before disconnect');
+        } catch (error) {
+          logger.warn('Failed to save snapshot before disconnect', error);
+
+          // Continue with disconnect even if snapshot fails
+        }
+      }
+
+      // Stop timeout manager
+      if (this.#timeoutManager) {
+        this.#timeoutManager.stop();
+        this.#timeoutManager = null;
+      }
+
+      await this.#sandboxProvider.disconnect();
+      this.#sandboxProvider = null;
+      this.#fileSyncManager = null;
+      this.#filesStore.setFileSyncManager(null);
+      this.#currentProjectId = null;
+      this.#currentUserId = null;
+    }
+  }
+
+  /**
+   * Reconnect to an existing sandbox or restore from snapshot.
+   * Called on page load/refresh to restore the workspace session.
+   *
+   * @param projectId - The project ID
+   * @param userId - The user ID
+   * @param sandboxId - Optional sandbox ID from project record
+   * @param sandboxProvider - Optional provider type from project record
+   * @param userPreference - Optional user preference for provider
+   * @returns Object with success status and provider instance
+   */
+  async reconnectOrRestore(
+    projectId: string,
+    userId?: string,
+    sandboxId?: string | null,
+    sandboxProvider?: SandboxProviderType | null,
+    userPreference?: SandboxProviderType,
+  ): Promise<{ success: boolean; provider: SandboxProvider | null; restored: boolean }> {
+    logger.info('Attempting to reconnect or restore session', {
+      projectId,
+      hasSandboxId: !!sandboxId,
+      sandboxProvider,
+      userPreference,
+    });
+
+    // If sandbox details not provided, fetch from API
+    if (!sandboxId || !sandboxProvider) {
+      try {
+        const response = await fetch(`/api/projects/${projectId}`);
+
+        if (response.ok) {
+          const project = (await response.json()) as {
+            sandboxId?: string | null;
+            sandboxProvider?: SandboxProviderType | null;
+            user_id?: string;
+          };
+          sandboxId = project.sandboxId ?? null;
+          sandboxProvider = project.sandboxProvider ?? null;
+
+          // Use project's user_id if userId not provided
+          if (!userId && project.user_id) {
+            userId = project.user_id;
+          }
+
+          logger.info('Fetched project details for sandbox restore', {
+            projectId,
+            hasSandboxId: !!sandboxId,
+            sandboxProvider,
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to fetch project details for sandbox restore', { error, projectId });
+      }
+    }
+
+    // Determine which provider to use
+    const providerType = resolveProviderType(userPreference, sandboxProvider ?? undefined);
+
+    this.#currentProviderType = providerType;
+    this.#currentProjectId = projectId;
+    this.#currentUserId = userId || 'anonymous';
+
+    // If we have a sandboxId and it's a Vercel provider, try to reconnect
+    if (sandboxId && providerType === 'vercel') {
+      try {
+        // Ensure userId is defined
+        const effectiveUserId = userId || 'anonymous';
+
+        console.log('[WorkbenchStore] Creating provider for reconnect', { sandboxId, providerType });
+
+        // Create provider without connecting (we'll reconnect instead)
+        const provider = await createSandboxProvider(
+          providerType,
+          {
+            projectId,
+            userId: effectiveUserId,
+            workdir: '/home/project',
+            timeout: 5 * 60 * 1000,
+            ports: [3000, 5173],
+            runtime: 'node22',
+          },
+          { skipConnect: true }, // Skip connect - we'll reconnect instead
+        );
+
+        console.log('[WorkbenchStore] Provider created, attempting reconnect', {
+          sandboxId,
+          providerStatus: provider.status,
+        });
+
+        // Try to reconnect to existing sandbox
+        const reconnected = await provider.reconnect(sandboxId);
+
+        console.log('[WorkbenchStore] Reconnect result:', { reconnected, providerStatus: provider.status });
+
+        if (reconnected) {
+          logger.info('Successfully reconnected to existing sandbox', { sandboxId });
+
+          this.#sandboxProvider = provider;
+
+          // Set up FileSyncManager
+          this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 100 });
+          this.#fileSyncManager.setProvider(provider);
+          this.#filesStore.setFileSyncManager(this.#fileSyncManager);
+
+          // Set up previews
+          provider.onPreviewReady((port, url) => {
+            this.#previewsStore.registerPreview(port, url, 'vercel');
+          });
+
+          // Set up timeout management
+          this._setupTimeoutManager(provider, projectId, effectiveUserId);
+
+          /*
+           * CONSISTENCY FIX: Sync local files to Supabase after reconnect
+           * This ensures Supabase snapshot matches the current workspace state.
+           * If the sandbox expires later, we'll have the latest state saved.
+           */
+          this.saveSnapshotToDatabase()
+            .then(() => {
+              logger.info('Snapshot synced to Supabase after reconnect');
+            })
+            .catch((error) => {
+              logger.warn('Failed to sync snapshot after reconnect', { error });
+
+              // Non-fatal - continue with the session
+            });
+
+          return { success: true, provider, restored: true };
+        } else {
+          logger.info('Failed to reconnect to sandbox, will create new one', { sandboxId });
+
+          // Disconnect the failed provider
+          await provider.disconnect();
+        }
+      } catch (error) {
+        logger.error('Error reconnecting to sandbox', { error, sandboxId });
+      }
+    }
+
+    // If we get here, we need to create a new sandbox
+    logger.info('Creating new sandbox session', { providerType });
+
+    try {
+      const provider = await this.initializeProvider(providerType, projectId, userId || 'anonymous');
+
+      // For Vercel provider, try to restore files from database snapshot
+      if (providerType === 'vercel') {
+        try {
+          const restored = await this.restoreFromDatabaseSnapshot();
+
+          if (restored) {
+            logger.info('Files restored from snapshot for new sandbox');
+          }
+        } catch (restoreError) {
+          logger.warn('Failed to restore from snapshot', restoreError);
+
+          // Continue without restoration - not fatal
+        }
+      }
+
+      return { success: true, provider, restored: false };
+    } catch (error) {
+      logger.error('Failed to create new sandbox', { error });
+      return { success: false, provider: null, restored: false };
+    }
+  }
+
+  /**
+   * Set up timeout management for a provider
+   */
+  private _setupTimeoutManager(provider: SandboxProvider, projectId: string, _userId: string): void {
+    if (provider.type !== 'vercel') {
+      // WebContainer doesn't have timeouts
+      return;
+    }
+
+    const config: TimeoutManagerConfig = {
+      warningThresholdMs: 2 * 60 * 1000, // 2 minutes
+      checkIntervalMs: 30 * 1000, // 30 seconds
+      autoExtend: true,
+      minAutoExtendIntervalMs: 60 * 1000, // 1 minute
+      onWarning: (timeRemainingMs) => {
+        logger.info('Timeout warning triggered - saving pre-emptive snapshot', { timeRemainingMs });
+
+        /*
+         * Save pre-emptive snapshot when warning is shown (2 min before timeout)
+         * This provides an extra safety net before the final timeout snapshot
+         */
+        this.saveSnapshotToDatabase()
+          .then(() => {
+            logger.info('Pre-emptive snapshot saved successfully');
+          })
+          .catch((error) => {
+            logger.warn('Failed to save pre-emptive snapshot', { error });
+
+            // Non-fatal - will try again on actual timeout
+          });
+
+        // The UI will subscribe to timeout warnings via the timeoutManager
+      },
+      onTimeout: () => {
+        logger.info('Session timeout occurred - saving snapshot before expiry');
+
+        // Save snapshot before showing error (fire-and-forget, but log result)
+        this.saveSnapshotToDatabase()
+          .then(() => {
+            logger.info('Snapshot saved successfully before timeout');
+          })
+          .catch((error) => {
+            logger.error('Failed to save snapshot before timeout', { error });
+          })
+          .finally(() => {
+            // Show error alert after snapshot attempt (regardless of success)
+            this.actionAlert.set({
+              type: 'error',
+              title: 'Session Expired',
+              description:
+                'Your sandbox session has expired. Your work has been saved. Please refresh to start a new session.',
+              content: '',
+            });
+          });
+      },
+      onExtended: (durationMs) => {
+        logger.info('Session extended', { durationMs });
+      },
+      requestExtend: async (durationMs) => {
+        try {
+          const response = await fetch('/api/sandbox/extend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId,
+              sandboxId: provider.sandboxId,
+              duration: durationMs,
+            }),
+          });
+          return response.ok;
+        } catch (error) {
+          logger.error('Failed to extend timeout', { error });
+          return false;
+        }
+      },
+    };
+
+    this.#timeoutManager = new TimeoutManager(config);
+    this.#timeoutManager.start(provider);
+  }
+
+  /**
+   * Record user activity for timeout auto-extension
+   */
+  recordActivity(type: 'file_write' | 'command' | 'preview_access' | 'user_interaction'): void {
+    if (this.#timeoutManager) {
+      this.#timeoutManager.recordActivity(type);
+    }
+  }
+
+  /**
+   * Request manual timeout extension
+   */
+  async requestTimeoutExtension(durationMs: number = 5 * 60 * 1000): Promise<boolean> {
+    if (!this.#timeoutManager) {
+      return false;
+    }
+
+    return this.#timeoutManager.requestExtension(durationMs);
+  }
+
+  /**
+   * Switch the sandbox provider for the current project.
+   * Disconnects the current provider and initializes a new one.
+   *
+   * @param newProviderType - The new provider type ('webcontainer' or 'vercel')
+   * @returns The new provider instance
+   */
+  async switchProvider(newProviderType: SandboxProviderType): Promise<SandboxProvider> {
+    const currentProjectId = this.#currentProjectId;
+    const currentUserId = this.#currentUserId;
+
+    if (!currentProjectId || !currentUserId) {
+      throw new Error('No active project to switch provider for');
+    }
+
+    logger.info('Switching sandbox provider', {
+      from: this.#currentProviderType,
+      to: newProviderType,
+      projectId: currentProjectId,
+    });
+
+    // Disconnect current provider
+    await this.disconnectProvider();
+
+    // Initialize new provider
+    const provider = await this.initializeProvider(newProviderType, currentProjectId, currentUserId);
+
+    // Update project record with new provider
+    try {
+      await fetch('/api/user/sandbox-preference', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferredProvider: newProviderType }),
+      });
+    } catch (error) {
+      logger.warn('Failed to update provider preference', { error });
+
+      // Non-fatal - provider is already switched
+    }
+
+    logger.info('Provider switched successfully', {
+      newProvider: newProviderType,
+      sandboxId: provider.sandboxId,
+    });
+
+    return provider;
+  }
+
+  /**
+   * Save the current file state as a snapshot to the database.
+   * This allows fast restoration when reopening the project later.
+   */
+  async saveSnapshotToDatabase(): Promise<void> {
+    const projectId = this.#currentProjectId;
+
+    if (!projectId) {
+      throw new Error('No active project to save snapshot for');
+    }
+
+    logger.info('Saving snapshot to database', { projectId });
+
+    // Get current files
+    const files = this.files.get();
+    const filesToSave: Record<string, { content: string; isBinary: boolean }> = {};
+
+    for (const [path, dirent] of Object.entries(files)) {
+      if (dirent?.type === 'file' && !dirent.isBinary) {
+        filesToSave[path] = {
+          content: dirent.content,
+          isBinary: dirent.isBinary,
+        };
+      }
+    }
+
+    const fileCount = Object.keys(filesToSave).length;
+
+    if (fileCount === 0) {
+      logger.warn('No files to save in snapshot');
+      return;
+    }
+
+    /*
+     * CONFLICT DETECTION: Check if snapshot was modified by another tab/session
+     * This prevents silent data loss when multiple tabs are editing the same project
+     */
+    if (this.#lastKnownSnapshotUpdatedAt) {
+      try {
+        const checkResponse = await fetch(`/api/projects/${projectId}/snapshot`);
+
+        if (checkResponse.ok) {
+          const currentSnapshot = (await checkResponse.json()) as { updated_at: string };
+          const lastKnown = new Date(this.#lastKnownSnapshotUpdatedAt).getTime();
+          const current = new Date(currentSnapshot.updated_at).getTime();
+
+          if (current > lastKnown) {
+            logger.warn('Snapshot conflict detected - another tab may have modified this project', {
+              projectId,
+              lastKnown: this.#lastKnownSnapshotUpdatedAt,
+              current: currentSnapshot.updated_at,
+            });
+
+            // Show warning to user but continue saving (last write wins)
+            this.actionAlert.set({
+              type: 'warning',
+              title: 'Snapshot Conflict',
+              description:
+                'Another browser tab may have modified this project. Your changes will overwrite the previous save.',
+              content: '',
+            });
+          }
+        }
+      } catch (error) {
+        // Non-fatal - continue with save
+        logger.debug('Failed to check for snapshot conflicts', { error });
+      }
+    }
+
+    // Save to database
+    const response = await fetch(`/api/projects/${projectId}/snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        files: filesToSave,
+        summary: `Auto-snapshot (${fileCount} files)`,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = (await response.json()) as { error?: string };
+      throw new Error(error.error || 'Failed to save snapshot');
+    }
+
+    // Update our known snapshot timestamp after successful save
+    const savedSnapshot = (await response.json()) as { updated_at?: string };
+
+    if (savedSnapshot.updated_at) {
+      this.#lastKnownSnapshotUpdatedAt = savedSnapshot.updated_at;
+    }
+
+    logger.info('Snapshot saved successfully', { projectId, fileCount });
+  }
+
+  /**
+   * Restore files from the database snapshot.
+   * Called when creating a new sandbox to restore previous state.
+   */
+  async restoreFromDatabaseSnapshot(): Promise<boolean> {
+    const projectId = this.#currentProjectId;
+
+    if (!projectId) {
+      logger.warn('No active project to restore snapshot for');
+      return false;
+    }
+
+    logger.info('Restoring from database snapshot', { projectId });
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/snapshot`);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          logger.info('No snapshot found for project', { projectId });
+          return false;
+        }
+
+        throw new Error('Failed to fetch snapshot');
+      }
+
+      const snapshot = (await response.json()) as {
+        files: Record<string, { content: string; isBinary: boolean }>;
+        updated_at: string;
+      };
+
+      if (!snapshot.files || Object.keys(snapshot.files).length === 0) {
+        logger.info('Snapshot is empty', { projectId });
+        return false;
+      }
+
+      // Track snapshot timestamp for conflict detection
+      this.#lastKnownSnapshotUpdatedAt = snapshot.updated_at;
+      this.#sessionStartedAt = Date.now();
+
+      // Restore files to the file store
+      const fileCount = Object.keys(snapshot.files).length;
+      logger.info(`Restoring ${fileCount} files from snapshot`, { projectId, snapshotUpdatedAt: snapshot.updated_at });
+
+      for (const [path, fileData] of Object.entries(snapshot.files)) {
+        await this.#filesStore.createFile(path, fileData.content);
+      }
+
+      // Sync restored files to Vercel if connected
+      if (this.#fileSyncManager) {
+        await this.#fileSyncManager.flushWrites();
+      }
+
+      logger.info('Snapshot restored successfully', { projectId, fileCount });
+
+      return true;
+    } catch (error) {
+      logger.error('Failed to restore from snapshot', { error, projectId });
+      return false;
+    }
   }
 
   get previews() {
@@ -274,12 +908,19 @@ export class WorkbenchStore {
       newUnsavedFiles.delete(filePath);
       this.unsavedFiles.set(newUnsavedFiles);
 
+      // Record activity for timeout management
+      this.recordActivity('file_write');
+
       return;
     }
 
     // If content is provided (from LLM action), save it directly to filesStore
     if (content !== undefined) {
       await this.#filesStore.saveFile(filePath, content);
+
+      // Record activity for timeout management
+      this.recordActivity('file_write');
+
       return;
     }
 
@@ -541,6 +1182,16 @@ export class WorkbenchStore {
     if (!this.artifactIdList.includes(id)) {
       this.artifactIdList.push(id);
     }
+
+    // Log provider state when creating artifact
+    console.log('[WorkbenchStore] addArtifact - creating ActionRunner', {
+      artifactId: id,
+      messageId,
+      hasProvider: !!this.#sandboxProvider,
+      providerType: this.#sandboxProvider?.type,
+      providerStatus: this.#sandboxProvider?.status,
+      sandboxId: this.#sandboxProvider?.sandboxId,
+    });
 
     this.artifacts.setKey(id, {
       id,

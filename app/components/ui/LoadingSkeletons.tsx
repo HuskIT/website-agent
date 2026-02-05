@@ -227,7 +227,7 @@ export function LoadingOverlay({
  */
 export function ButtonSkeleton({ className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   // Filter out button-specific props that aren't valid on div elements
-  const { disabled, type, value, ...divProps } = props;
+  const { disabled: _disabled, type: _type, value: _value, ...divProps } = props;
   return (
     <Skeleton
       className={classNames('h-10 px-4 py-2 inline-flex items-center', className)}

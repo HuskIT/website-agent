@@ -4,6 +4,9 @@ interface Profile {
   username: string;
   bio: string;
   avatar: string;
+  preferences?: {
+    sandboxProvider?: 'webcontainer' | 'vercel';
+  };
 }
 
 // Initialize with stored profile or defaults

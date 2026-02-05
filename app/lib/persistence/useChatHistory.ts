@@ -431,6 +431,29 @@ ${value.content}
         retryCount: 0,
         lastRetryAt: null,
       });
+
+      // Initialize sandbox provider for this project
+      if (projectId) {
+        try {
+          logger.info('Initializing sandbox provider for project', { projectId });
+
+          const result = await workbenchStore.reconnectOrRestore(projectId);
+
+          if (result.success) {
+            logger.info('Sandbox provider initialized', {
+              projectId,
+              providerType: workbenchStore.currentProviderType,
+              restored: result.restored,
+            });
+          } else {
+            logger.warn('Failed to initialize sandbox provider', { projectId });
+          }
+        } catch (error) {
+          logger.error('Error initializing sandbox provider', { error, projectId });
+
+          // Don't fail the whole load if sandbox init fails
+        }
+      }
     };
 
     // Execute the loadMessages function
