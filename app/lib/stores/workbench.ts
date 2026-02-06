@@ -32,11 +32,11 @@ const logger = createScopedLogger('WorkbenchStore');
  * Used for Vercel Sandbox uploads (4MB limit).
  */
 function createChunksStrict(
-  files: Array<{ path: string; content: Buffer; size: number }>,
+  files: Array<{ path: string; content: any; size: number; encoding?: string }>,
   maxChunkSize: number,
-): Array<Array<{ path: string; content: Buffer }>> {
-  const chunks: Array<Array<{ path: string; content: Buffer }>> = [];
-  let currentChunk: Array<{ path: string; content: Buffer }> = [];
+): Array<Array<{ path: string; content: any; encoding?: string }>> {
+  const chunks: Array<Array<{ path: string; content: any; encoding?: string }>> = [];
+  let currentChunk: Array<{ path: string; content: any; encoding?: string }> = [];
   let currentSize = 0;
 
   for (const file of files) {
@@ -52,7 +52,7 @@ function createChunksStrict(
         currentSize = 0;
       }
 
-      chunks.push([{ path: file.path, content: file.content }]);
+      chunks.push([{ path: file.path, content: file.content, encoding: file.encoding }]);
       continue;
     }
 
@@ -71,7 +71,7 @@ function createChunksStrict(
       currentSize = 0;
     }
 
-    currentChunk.push({ path: file.path, content: file.content });
+    currentChunk.push({ path: file.path, content: file.content, encoding: file.encoding });
     currentSize += file.size;
   }
 
@@ -366,6 +366,7 @@ export class WorkbenchStore {
     sandboxProvider?: SandboxProviderType | null,
     userPreference?: SandboxProviderType,
   ): Promise<{ success: boolean; provider: SandboxProvider | null; restored: boolean }> {
+    console.log('🔥🔥🔥 reconnectOrRestore CALLED', { projectId, userId, sandboxId, sandboxProvider, userPreference });
     logger.info('Attempting to reconnect or restore session', {
       projectId,
       hasSandboxId: !!sandboxId,
@@ -464,6 +465,7 @@ export class WorkbenchStore {
            * CRITICAL: Restore files from database snapshot even on reconnect
            * This ensures all files are uploaded to the sandbox with proper chunking
            */
+          console.log('🔥 Reconnected successfully, calling restoreFromDatabaseSnapshot');
           try {
             const restored = await this.restoreFromDatabaseSnapshot();
 
@@ -505,13 +507,16 @@ export class WorkbenchStore {
     }
 
     // If we get here, we need to create a new sandbox
+    console.log('🔥 Creating new sandbox session, providerType:', providerType);
     logger.info('Creating new sandbox session', { providerType });
 
     try {
       const provider = await this.initializeProvider(providerType, projectId, userId || 'anonymous');
+      console.log('🔥 Provider initialized, checking if vercel. providerType:', providerType);
 
       // For Vercel provider, try to restore files from database snapshot
       if (providerType === 'vercel') {
+        console.log('🔥 Calling restoreFromDatabaseSnapshot for vercel provider');
         try {
           const restored = await this.restoreFromDatabaseSnapshot();
 
@@ -784,13 +789,16 @@ export class WorkbenchStore {
    * Called when creating a new sandbox to restore previous state.
    */
   async restoreFromDatabaseSnapshot(): Promise<boolean> {
+    console.log('🔥 restoreFromDatabaseSnapshot CALLED');
     const projectId = this.#currentProjectId;
 
     if (!projectId) {
+      console.log('🔥 restoreFromDatabaseSnapshot EARLY EXIT: no projectId');
       logger.warn('No active project to restore snapshot for');
       return false;
     }
 
+    console.log('🔥 restoreFromDatabaseSnapshot: proceeding with projectId:', projectId);
     logger.info('Restoring from database snapshot', { projectId });
     this.loadingStatus.set('Restoring Files...');
 
@@ -884,37 +892,105 @@ export class WorkbenchStore {
 
       // Write all files to sandbox in chunked batches (Vercel has 4MB limit)
       if (this.#sandboxProvider) {
-        // Prepare files with CORRECT base64 decoding
-        const filesWithSizes = Object.entries(snapshot.files).map(([filePath, fileData]) => {
-          const contentBuffer = Buffer.from(fileData.content, 'base64');
-          return {
-            path: filePath,
-            content: contentBuffer,
-            size: contentBuffer.length,
-          };
+        // Prepare files in API-ready format (bypass provider to avoid Buffer issues)
+        const apiFiles = Object.entries(snapshot.files)
+          .filter(([, fileData]) => {
+            // Skip invalid entries
+            if (!fileData || typeof fileData.content !== 'string') {
+              console.warn('[DEBUG] Skipping invalid file entry:', fileData);
+              return false;
+            }
+            return true;
+          })
+          .map(([filePath, fileData]) => {
+            if (fileData.isBinary) {
+              // Binary files: content is already base64, use as-is
+              return {
+                path: filePath,
+                content: fileData.content,
+                encoding: 'base64' as const,
+                size: atob(fileData.content).length, // Decode to get actual size
+              };
+            } else {
+              // Text files: content is UTF-8 string, send as utf8 (schema expects 'utf8' not 'utf-8')
+              return {
+                path: filePath,
+                content: fileData.content,
+                encoding: 'utf8' as const,
+                size: new TextEncoder().encode(fileData.content).length,
+              };
+            }
+          });
+
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Prepared files:', {
+          total: apiFiles.length,
+          sample: apiFiles[0]
+            ? {
+                path: apiFiles[0].path,
+                encoding: apiFiles[0].encoding,
+                hasContent: !!apiFiles[0].content,
+                contentType: typeof apiFiles[0].content,
+                size: apiFiles[0].size,
+              }
+            : null,
         });
 
-        const chunks = createChunksStrict(filesWithSizes, 512 * 1024);
+        const chunks = createChunksStrict(apiFiles, 512 * 1024);
 
         this.loadingStatus.set(`Syncing to Sandbox (v3 - Fresh, ${chunks.length} batches)...`);
 
         console.log('[DEBUG restoreFromDatabaseSnapshot] Starting chunked upload:', {
-          totalFiles: filesWithSizes.length,
+          totalFiles: apiFiles.length,
           chunkCount: chunks.length,
           firstChunkFiles: chunks[0]?.length,
         });
 
-        // Upload chunks sequentially
+        // Upload chunks sequentially via API route (bypasses Buffer issues)
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
-          const chunkSize = chunk.reduce((sum, f) => sum + f.content.length, 0);
+          const chunkSize = chunk.reduce((sum, f) => sum + ((f as any).size || 0), 0);
 
           console.log(
             `[DEBUG restoreFromDatabaseSnapshot] Uploading chunk ${i + 1}/${chunks.length} (${chunk.length} files, ~${(chunkSize / 1024 / 1024).toFixed(4)}MB)`,
           );
 
           try {
-            await this.#sandboxProvider.writeFiles(chunk);
+            // Call API directly instead of provider.writeFiles() to avoid Buffer issues
+            const requestBody = {
+              projectId,
+              sandboxId: this.#sandboxProvider.sandboxId,
+              files: chunk.map((f) => ({
+                path: f.path,
+                content: f.content,
+                encoding: f.encoding,
+              })),
+            };
+
+            console.log('[DEBUG] Request body sample:', {
+              projectId: requestBody.projectId,
+              sandboxId: requestBody.sandboxId,
+              fileCount: requestBody.files.length,
+              firstFile: requestBody.files[0]
+                ? {
+                    path: requestBody.files[0].path,
+                    encoding: requestBody.files[0].encoding,
+                    contentLength: String(requestBody.files[0].content).length,
+                    contentPreview: String(requestBody.files[0].content).substring(0, 50),
+                  }
+                : null,
+            });
+
+            const response = await fetch('/api/sandbox/files', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody),
+            });
+
+            if (!response.ok) {
+              const errorData = (await response.json().catch(() => ({}))) as { error?: string };
+              throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+            }
+
             console.log(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
 
             /*
@@ -950,6 +1026,10 @@ export class WorkbenchStore {
         } catch (findError) {
           console.warn('[DEBUG restoreFromDatabaseSnapshot] find command failed:', findError);
         }
+
+        // Patch vite.config.ts to allow Vercel sandbox hosts (before starting dev server)
+        console.log('[DEBUG restoreFromDatabaseSnapshot] Patching vite.config.ts for Vercel Sandbox...');
+        await this.#patchViteConfigForVercel();
 
         // Fire-and-forget: install deps + start dev server
         console.log('[DEBUG restoreFromDatabaseSnapshot] Calling #autoStartDevServer');
@@ -1077,6 +1157,101 @@ export class WorkbenchStore {
     } catch (error) {
       logger.error('[autoStartDevServer] Error during auto-start', { error });
       console.error('[DEBUG #autoStartDevServer] Error during auto-start:', error);
+    }
+  }
+
+  /**
+   * Automatically patch vite.config.ts to allow all hosts for Vercel Sandbox.
+   * This fixes CORS issues when the sandbox is accessed via Vercel's proxy URL.
+   */
+  async #patchViteConfigForVercel(): Promise<void> {
+    const provider = this.#sandboxProvider;
+    const projectId = this.#currentProjectId;
+
+    if (!provider || !projectId) {
+      console.log('[patchViteConfigForVercel] Skipping: no provider or projectId');
+      return;
+    }
+
+    try {
+      console.log('[patchViteConfigForVercel] Checking for vite.config file...');
+
+      // Check for vite.config.ts or vite.config.js
+      let configFileName: string | null = null;
+      let configContent: string | null = null;
+
+      for (const fileName of ['vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs']) {
+        try {
+          const result = await provider.runCommand('cat', [fileName]);
+
+          if (result.exitCode === 0) {
+            configFileName = fileName;
+            configContent = result.stdout;
+            console.log(`[patchViteConfigForVercel] Found ${fileName}`);
+            break;
+          }
+        } catch {
+          // File doesn't exist, try next
+        }
+      }
+
+      if (!configFileName || !configContent) {
+        console.log('[patchViteConfigForVercel] No vite.config file found, skipping');
+        return;
+      }
+
+      // Check if allowedHosts is already set
+      if (configContent.includes('allowedHosts')) {
+        console.log('[patchViteConfigForVercel] allowedHosts already configured');
+        return;
+      }
+
+      // Modify the config to add allowedHosts
+      let patchedContent = configContent;
+
+      if (patchedContent.includes('server:')) {
+        // Add allowedHosts to existing server config
+        patchedContent = patchedContent.replace(/server:\s*{/g, 'server: {\n    allowedHosts: true,');
+        console.log('[patchViteConfigForVercel] Added allowedHosts to existing server config');
+      } else {
+        // Add new server config after plugins
+        if (patchedContent.includes('plugins:')) {
+          patchedContent = patchedContent.replace(
+            /plugins:\s*\[.*?\],/s,
+            (match) => `${match}\n  server: {\n    host: '0.0.0.0',\n    allowedHosts: true,\n  },`,
+          );
+          console.log('[patchViteConfigForVercel] Added new server config with allowedHosts');
+        }
+      }
+
+      // Upload the patched config via API
+      const response = await fetch('/api/sandbox/files', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          sandboxId: provider.sandboxId,
+          files: [
+            {
+              path: configFileName,
+              content: patchedContent,
+              encoding: 'utf8',
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to upload patched config: ${response.statusText}`);
+      }
+
+      logger.info('[patchViteConfigForVercel] Successfully patched vite.config', { fileName: configFileName });
+      console.log('[patchViteConfigForVercel] ✅ Config patched and uploaded');
+    } catch (error) {
+      // Non-fatal - log and continue
+      logger.warn('[patchViteConfigForVercel] Failed to patch config', { error });
+      console.warn('[patchViteConfigForVercel] Error:', error);
     }
   }
 

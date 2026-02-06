@@ -73,7 +73,8 @@
       "Bash(/Users/linhng/Documents/HyperPage-MVP/website-agent/tests/sandbox-test-runner.sh)",
       "Bash(test:*)",
       "Bash(./tests/sandbox-mvp-verify.sh:*)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(pnpm install:*)"
     ],
     "deny": [],
     "ask": []

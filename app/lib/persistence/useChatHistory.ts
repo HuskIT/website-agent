@@ -435,9 +435,11 @@ ${value.content}
       // Initialize sandbox provider for this project
       if (projectId) {
         try {
+          console.log('🔥🔥🔥 useChatHistory: About to call reconnectOrRestore', { projectId });
           logger.info('Initializing sandbox provider for project', { projectId });
 
           const result = await workbenchStore.reconnectOrRestore(projectId);
+          console.log('🔥🔥🔥 useChatHistory: reconnectOrRestore returned', { result });
 
           if (result.success) {
             logger.info('Sandbox provider initialized', {
@@ -712,7 +714,9 @@ ${value.content}
     }
 
     // Update file store in one atomic operation (instant UI)
+    console.log('🔥🔥🔥 useChatHistory: Populating file store with', Object.keys(fileMap).length, 'entries');
     workbenchStore.filesStore.files.set(fileMap);
+    console.log('🔥🔥🔥 useChatHistory: File store populated');
 
     logger.info('Snapshot files loaded to store (cloud-native)', {
       id,

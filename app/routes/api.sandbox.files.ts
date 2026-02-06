@@ -45,10 +45,23 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Parse and validate request body
-    const body = await request.json();
+    const body = (await request.json()) as any;
+
+    // Debug: log request body structure
+    logger.info('Received writeFiles request', {
+      hasProjectId: !!body?.projectId,
+      hasSandboxId: !!body?.sandboxId,
+      filesCount: Array.isArray(body?.files) ? body.files.length : 0,
+    });
+
     const parseResult = WriteFilesRequestSchema.safeParse(body);
 
     if (!parseResult.success) {
+      logger.error('Request validation failed', {
+        issues: parseResult.error.issues,
+        body: { projectId: body?.projectId, sandboxId: body?.sandboxId, filesCount: body?.files?.length }
+      });
+
       return json(
         {
           error: 'Invalid request body',
