@@ -151,7 +151,7 @@ You are a code generator. Do NOT use function calls.
 
 Output files using ONLY:
 <boltArtifact id="..." title="...">
-  <boltAction type="file" filePath="...">content</boltAction>
+<boltAction type="file" filePath="...">content</boltAction>
 </boltArtifact>
 
 FORBIDDEN (will be ignored): <function_calls>, <invoke>, <parameter>, bash heredoc
