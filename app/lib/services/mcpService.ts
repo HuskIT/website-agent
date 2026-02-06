@@ -3,7 +3,7 @@ import {
   type ToolSet,
   type Message,
   type DataStreamWriter,
-  convertToCoreMessages,
+  convertToModelMessages,
   formatDataStreamPart,
 } from 'ai';
 import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio';
@@ -407,7 +407,7 @@ export class MCPService {
 
             try {
               result = await toolInstance.execute(toolInvocation.args, {
-                messages: convertToCoreMessages(messages),
+                messages: await convertToModelMessages(messages),
                 toolCallId,
               });
             } catch (error) {
