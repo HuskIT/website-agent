@@ -229,6 +229,29 @@ export class WorkbenchStore {
   }
 
   /**
+   * Get sandbox lifetime information (remaining time, expiration status)
+   * Returns null if no sandbox is active or timeout tracking is not available
+   */
+  getSandboxLifetime(): {
+    timeRemainingMs: number;
+    timeRemainingMinutes: number;
+    isExpired: boolean;
+    warningShown: boolean;
+  } | null {
+    if (!this.#timeoutManager) {
+      return null;
+    }
+
+    const state = this.#timeoutManager.getState();
+    return {
+      timeRemainingMs: state.timeRemainingMs,
+      timeRemainingMinutes: Math.floor(state.timeRemainingMs / 60000),
+      isExpired: state.isExpired,
+      warningShown: state.warningShown,
+    };
+  }
+
+  /**
    * Initialize the sandbox provider for the current project.
    * This wires up the provider to FilesStore (via FileSyncManager) and PreviewsStore.
    *
@@ -493,7 +516,14 @@ export class WorkbenchStore {
 
           return { success: true, provider, restored: true };
         } else {
-          logger.info('Failed to reconnect to sandbox, will create new one', { sandboxId });
+          logger.info('Failed to reconnect to sandbox (likely expired), will create new one', {
+            sandboxId,
+            reason: 'Sandbox expired or stopped',
+          });
+          console.log('⚠️ Sandbox reconnection failed - sandbox may have expired after 5 minutes');
+
+          // Show user-friendly message
+          this.loadingStatus.set('Previous session expired. Creating new sandbox...');
 
           // Disconnect the failed provider
           await provider.disconnect();
@@ -509,11 +539,52 @@ export class WorkbenchStore {
 
     // If we get here, we need to create a new sandbox
     console.log('🔥 Creating new sandbox session, providerType:', providerType);
-    logger.info('Creating new sandbox session', { providerType });
+    logger.info('Creating new sandbox session', { providerType, reason: sandboxId ? 'reconnect_failed' : 'no_sandbox_id' });
 
     try {
       const provider = await this.initializeProvider(providerType, projectId, userId || 'anonymous');
-      console.log('🔥 Provider initialized, checking if vercel. providerType:', providerType);
+      console.log('🔥 Provider initialized:', {
+        providerType,
+        newSandboxId: provider.sandboxId,
+        oldSandboxId: sandboxId,
+        providerStatus: provider.status,
+      });
+
+      // Update database with new sandbox ID
+      if (provider.sandboxId && provider.sandboxId !== sandboxId) {
+        console.log('🔥 Updating project with new sandbox ID:', {
+          oldSandboxId: sandboxId,
+          newSandboxId: provider.sandboxId,
+          projectId,
+        });
+
+        try {
+          const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sandboxId: provider.sandboxId,
+              sandboxProvider: providerType,
+            }),
+          });
+
+          if (response.ok) {
+            logger.info('Updated project with new sandbox ID', {
+              projectId,
+              sandboxId: provider.sandboxId,
+              oldSandboxId: sandboxId,
+            });
+          } else {
+            logger.warn('Failed to update project with new sandbox ID', {
+              projectId,
+              status: response.status,
+            });
+          }
+        } catch (updateError) {
+          logger.warn('Error updating project with new sandbox ID', { error: updateError });
+          // Continue even if database update fails - not fatal
+        }
+      }
 
       // For Vercel provider, try to restore files from database snapshot
       if (providerType === 'vercel') {
@@ -1117,22 +1188,32 @@ export class WorkbenchStore {
     }
 
     logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
-    console.log('[DEBUG #autoStartDevServer] About to run npm install');
+    console.log('[DEBUG #autoStartDevServer] About to run npm install with sandbox:', {
+      sandboxId: provider.sandboxId,
+      providerType: provider.type,
+      providerStatus: provider.status,
+    });
 
     try {
       // Await install so dependencies are available before starting the server
       console.log('[DEBUG #autoStartDevServer] Calling provider.runCommand for npm install...');
 
       const installResult = await provider.runCommand('npm', ['install', '--no-audit', '--no-fund', '--silent']);
-      console.log('[DEBUG #autoStartDevServer] npm install completed:', { exitCode: installResult.exitCode });
+      console.log('[DEBUG #autoStartDevServer] npm install completed:', {
+        exitCode: installResult.exitCode,
+        stdout: installResult.stdout?.substring(0, 500),
+        stderr: installResult.stderr?.substring(0, 500),
+      });
 
       if (installResult.exitCode !== 0) {
         logger.error('[autoStartDevServer] npm install failed', {
           exitCode: installResult.exitCode,
+          stdout: installResult.stdout,
           stderr: installResult.stderr,
         });
         console.error('[DEBUG #autoStartDevServer] npm install failed:', {
           exitCode: installResult.exitCode,
+          stdout: installResult.stdout,
           stderr: installResult.stderr,
         });
 
@@ -1160,8 +1241,14 @@ export class WorkbenchStore {
       provider.runCommand('sh', devArgs);
       console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
     } catch (error) {
-      logger.error('[autoStartDevServer] Error during auto-start', { error });
-      console.error('[DEBUG #autoStartDevServer] Error during auto-start:', error);
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : 'Unknown',
+        stack: error instanceof Error ? error.stack : undefined,
+        raw: error,
+      };
+      logger.error('[autoStartDevServer] Error during auto-start', { error: errorDetails });
+      console.error('[DEBUG #autoStartDevServer] Error during auto-start:', errorDetails);
     }
   }
 

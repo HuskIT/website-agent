@@ -109,62 +109,38 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
     }
 
     const { baseUrl, provider } = activePreview;
-    setIframeUrl(baseUrl);
+
+    /*
+     * For Vercel Sandbox, use a proxy route without COEP headers to avoid
+     * ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep errors.
+     * The main workbench has COEP headers for WebContainer, but Vercel Sandbox
+     * doesn't have compatible CORS headers.
+     */
+    if (provider === 'vercel') {
+      // Use proxy route that doesn't have COEP headers
+      const proxyUrl = `/webcontainer/vercel-preview?url=${encodeURIComponent(baseUrl)}`;
+      console.log('[Preview] 🔄 Using proxy URL for Vercel Sandbox:', { baseUrl, proxyUrl });
+      setIframeUrl(proxyUrl);
+    } else {
+      // WebContainer uses direct URL
+      console.log('[Preview] 📡 Using direct URL for WebContainer:', { baseUrl });
+      setIframeUrl(baseUrl);
+    }
+
     setDisplayPath('/');
 
     /*
-     * Vercel Sandbox domains are baked in at creation time via domain() but nothing
-     * listens on the port until the dev server actually starts inside the microVM.
-     * Poll until the server responds before loading the iframe.
-     * WebContainer already gates previews on its own server-ready event, so skip polling.
+     * IMPORTANT: Skip client-side polling to avoid COEP errors.
+     *
+     * For Vercel Sandbox: Client-side fetch() triggers COEP errors
+     * (ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep)
+     * because the workbench has COEP headers but Vercel URLs don't have
+     * compatible CORS headers. The proxy route handles loading state internally.
+     *
+     * For WebContainer: Already gates previews on its own server-ready event.
      */
-    setServerReady(provider !== 'vercel');
+    setServerReady(true);
   }, [activePreview]);
-
-  // Poll a Vercel preview URL until the server responds, then show the iframe.
-  useEffect(() => {
-    if (serverReady || !iframeUrl) {
-      return undefined;
-    }
-
-    // Capture in a local so the closure always has a string (guard above ensures it).
-    const targetUrl = iframeUrl;
-
-    let cancelled = false;
-    let retryCount = 0;
-    const MAX_RETRIES = 90; // ~3 min at 2 s intervals
-
-    async function poll() {
-      if (cancelled || retryCount >= MAX_RETRIES) {
-        // Give up – let the iframe load so the user sees the real error.
-        if (!cancelled) {
-          setServerReady(true);
-        }
-
-        return;
-      }
-
-      try {
-        await fetch(targetUrl, { mode: 'no-cors', signal: AbortSignal.timeout(5000) });
-
-        if (!cancelled) {
-          setServerReady(true);
-        }
-      } catch {
-        retryCount += 1;
-
-        if (!cancelled) {
-          setTimeout(poll, 2000);
-        }
-      }
-    }
-
-    poll();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [serverReady, iframeUrl]);
 
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {

@@ -85,8 +85,17 @@ export default async function handleRequest(
 
   responseHeaders.set('Content-Type', 'text/html');
 
-  responseHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
-  responseHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+  /*
+   * IMPORTANT: Skip COEP headers for Vercel Sandbox proxy route
+   * The proxy route needs to fetch Vercel Sandbox URLs without COEP restrictions.
+   * All other routes need COEP for WebContainer to work (SharedArrayBuffer requirement).
+   */
+  const isVercelPreviewProxy = url.pathname.startsWith('/webcontainer/vercel-preview');
+
+  if (!isVercelPreviewProxy) {
+    responseHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    responseHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+  }
 
   return new Response(body, {
     headers: responseHeaders,

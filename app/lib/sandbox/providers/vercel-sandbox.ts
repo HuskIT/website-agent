@@ -361,6 +361,13 @@ export class VercelSandboxProvider implements SandboxProvider {
       throw new Error('Sandbox not connected');
     }
 
+    console.log('[VercelProvider] runCommand called:', {
+      cmd,
+      args,
+      sandboxId: this._sandboxId,
+      projectId: this._config.projectId,
+    });
+
     let stdout = '';
     let stderr = '';
     let exitCode = 0;
