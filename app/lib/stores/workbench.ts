@@ -466,6 +466,7 @@ export class WorkbenchStore {
            * This ensures all files are uploaded to the sandbox with proper chunking
            */
           console.log('🔥 Reconnected successfully, calling restoreFromDatabaseSnapshot');
+
           try {
             const restored = await this.restoreFromDatabaseSnapshot();
 
@@ -517,6 +518,7 @@ export class WorkbenchStore {
       // For Vercel provider, try to restore files from database snapshot
       if (providerType === 'vercel') {
         console.log('🔥 Calling restoreFromDatabaseSnapshot for vercel provider');
+
         try {
           const restored = await this.restoreFromDatabaseSnapshot();
 
@@ -790,11 +792,13 @@ export class WorkbenchStore {
    */
   async restoreFromDatabaseSnapshot(): Promise<boolean> {
     console.log('🔥 restoreFromDatabaseSnapshot CALLED');
+
     const projectId = this.#currentProjectId;
 
     if (!projectId) {
       console.log('🔥 restoreFromDatabaseSnapshot EARLY EXIT: no projectId');
       logger.warn('No active project to restore snapshot for');
+
       return false;
     }
 
@@ -900,6 +904,7 @@ export class WorkbenchStore {
               console.warn('[DEBUG] Skipping invalid file entry:', fileData);
               return false;
             }
+
             return true;
           })
           .map(([filePath, fileData]) => {

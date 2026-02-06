@@ -59,7 +59,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!parseResult.success) {
       logger.error('Request validation failed', {
         issues: parseResult.error.issues,
-        body: { projectId: body?.projectId, sandboxId: body?.sandboxId, filesCount: body?.files?.length }
+        body: { projectId: body?.projectId, sandboxId: body?.sandboxId, filesCount: body?.files?.length },
       });
 
       return json(
