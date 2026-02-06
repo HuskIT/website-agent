@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { useLoaderData, useSearchParams } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
 
 /**
@@ -40,7 +40,7 @@ export default function VercelSandboxPreview() {
   // Poll the Vercel Sandbox URL until it's ready
   useEffect(() => {
     if (!isPolling) {
-      return;
+      return undefined;
     }
 
     let cancelled = false;
@@ -53,6 +53,7 @@ export default function VercelSandboxPreview() {
           setIsPolling(false);
           setIsLoading(false);
         }
+
         return;
       }
 
@@ -67,11 +68,12 @@ export default function VercelSandboxPreview() {
         if (!cancelled) {
           console.log('[VercelPreview] Server is ready, loading iframe');
           setIsPolling(false);
+
           if (iframeRef.current) {
             iframeRef.current.src = sandboxUrl;
           }
         }
-      } catch (err) {
+      } catch (_ignored) {
         // Server not ready yet, retry after 2 seconds
         if (!cancelled) {
           setPollingAttempts((prev) => prev + 1);
@@ -116,9 +118,7 @@ export default function VercelSandboxPreview() {
 
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 z-10">
-          <div className="text-red-600 dark:text-red-400 text-sm text-center px-4">
-            {error}
-          </div>
+          <div className="text-red-600 dark:text-red-400 text-sm text-center px-4">{error}</div>
           <button
             onClick={() => {
               setError(null);

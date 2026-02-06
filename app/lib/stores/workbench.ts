@@ -243,6 +243,7 @@ export class WorkbenchStore {
     }
 
     const state = this.#timeoutManager.getState();
+
     return {
       timeRemainingMs: state.timeRemainingMs,
       timeRemainingMinutes: Math.floor(state.timeRemainingMs / 60000),
@@ -539,7 +540,10 @@ export class WorkbenchStore {
 
     // If we get here, we need to create a new sandbox
     console.log('🔥 Creating new sandbox session, providerType:', providerType);
-    logger.info('Creating new sandbox session', { providerType, reason: sandboxId ? 'reconnect_failed' : 'no_sandbox_id' });
+    logger.info('Creating new sandbox session', {
+      providerType,
+      reason: sandboxId ? 'reconnect_failed' : 'no_sandbox_id',
+    });
 
     try {
       const provider = await this.initializeProvider(providerType, projectId, userId || 'anonymous');
@@ -582,6 +586,7 @@ export class WorkbenchStore {
           }
         } catch (updateError) {
           logger.warn('Error updating project with new sandbox ID', { error: updateError });
+
           // Continue even if database update fails - not fatal
         }
       }
