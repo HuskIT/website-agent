@@ -1,4 +1,4 @@
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import { generateId } from './fileUtils';
 import { detectProjectCommands, createCommandsMessage, escapeBoltTags } from './projectCommands';
 
@@ -6,7 +6,7 @@ export const createChatFromFolder = async (
   files: File[],
   binaryFiles: string[],
   folderName: string,
-): Promise<Message[]> => {
+): Promise<PersistedMessage[]> => {
   const fileArtifacts = await Promise.all(
     files.map(async (file) => {
       return new Promise<{ content: string; path: string }>((resolve, reject) => {
@@ -34,7 +34,7 @@ export const createChatFromFolder = async (
       ? `\n\nSkipped ${binaryFiles.length} binary files:\n${binaryFiles.map((f) => `- ${f}`).join('\n')}`
       : '';
 
-  const filesMessage: Message = {
+  const filesMessage: PersistedMessage = {
     role: 'assistant',
     content: `I've imported the contents of the "${folderName}" folder.${binaryFilesMessage}
 
@@ -51,7 +51,7 @@ ${escapeBoltTags(file.content)}
     createdAt: new Date(),
   };
 
-  const userMessage: Message = {
+  const userMessage: PersistedMessage = {
     role: 'user',
     id: generateId(),
     content: `Import the "${folderName}" folder`,

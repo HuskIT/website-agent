@@ -1,4 +1,4 @@
-import { convertToModelMessages, streamText as _streamText, type Message } from 'ai';
+import { convertToModelMessages, streamText as _streamText } from 'ai';
 import { MAX_TOKENS, PROVIDER_COMPLETION_LIMITS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, WORK_DIR } from '~/utils/constants';
@@ -7,13 +7,13 @@ import { PromptLibrary } from '~/lib/common/prompt-library';
 import { allowedHTMLElements } from '~/utils/markdown';
 import { LLMManager } from '~/lib/modules/llm/manager';
 import { createScopedLogger } from '~/utils/logger';
-import { createFilesContext, extractPropertiesFromMessage } from './utils';
+import { createFilesContext, extractPropertiesFromMessage, type LegacyMessage } from './utils';
 import { discussPrompt } from '~/lib/common/prompts/discuss-prompt';
 import type { DesignScheme } from '~/types/design-scheme';
 import type { RestaurantThemeId } from '~/types/restaurant-theme';
 import { getThemePrompt } from '~/theme-prompts/registry';
 
-export type Messages = Message[];
+export type Messages = LegacyMessage[];
 
 export interface StreamingOptions extends Omit<Parameters<typeof _streamText>[0], 'model'> {
   supabaseConnection?: {
@@ -56,7 +56,7 @@ function sanitizeText(text: string): string {
 }
 
 export async function streamText(props: {
-  messages: Omit<Message, 'id'>[];
+  messages: Omit<LegacyMessage, 'id'>[];
   env?: Env;
   options?: StreamingOptions;
   apiKeys?: Record<string, string>;
@@ -328,6 +328,9 @@ ${themePrompt}
     ),
   );
 
+  // Destructure out `prompt` to avoid conflict with `messages` in streamText params
+  const { prompt: _prompt, ...safeOptions } = filteredOptions;
+
   const streamParams = {
     model: provider.getModelInstance({
       model: modelDetails.name,
@@ -338,7 +341,7 @@ ${themePrompt}
     system: chatMode === 'build' ? systemPrompt : discussPrompt(),
     ...tokenParams,
     messages: await convertToModelMessages(processedMessages as any),
-    ...filteredOptions,
+    ...safeOptions,
 
     // Set temperature to 1 for reasoning models (required by OpenAI API)
     ...(isReasoning ? { temperature: 1 } : {}),

@@ -130,7 +130,7 @@ export default class OllamaProvider extends BaseProvider {
 
     const ollamaInstance = ollama(model, {
       numCtx: this.getDefaultNumCtx(serverEnv),
-    }) as LanguageModel & { config: any };
+    }) as unknown as LanguageModel & { config: any };
 
     ollamaInstance.config.baseURL = `${baseUrl}/api`;
 

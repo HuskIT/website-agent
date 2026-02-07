@@ -1,4 +1,4 @@
-import type { Message } from 'ai';
+import type { PersistedMessage, SequencedMessage } from '~/types/message-loading';
 import { createScopedLogger } from '~/utils/logger';
 import type { ChatHistoryItem } from './useChatHistory';
 import type { Snapshot } from './types'; // Import Snapshot type
@@ -10,7 +10,6 @@ import type { MessageLoadProgress } from '~/types/message-loading';
 import { extractMessageAnnotations, normalizeAnnotationsForServer } from './annotationHelpers';
 import { MESSAGE_PAGE_SIZE } from './chatSyncConstants';
 import { authStore } from '~/lib/stores/auth';
-import type { SequencedMessage } from './messageSort';
 
 export interface IChatMetadata {
   gitUrl: string;
@@ -74,7 +73,7 @@ export async function getAll(db: IDBDatabase): Promise<ChatHistoryItem[]> {
 export async function setMessages(
   db: IDBDatabase,
   id: string,
-  messages: Message[],
+  messages: PersistedMessage[],
   urlId?: string,
   description?: string,
   timestamp?: string,
@@ -264,7 +263,7 @@ export async function duplicateChat(db: IDBDatabase, id: string): Promise<string
 export async function createChatFromMessages(
   db: IDBDatabase,
   description: string,
-  messages: Message[],
+  messages: PersistedMessage[],
   metadata?: IChatMetadata,
 ): Promise<string> {
   const newId = await getNextId(db);
@@ -384,16 +383,16 @@ export async function getServerMessages(
       return null;
     }
 
-    // Convert ProjectMessage[] to Message[] format and reverse to chronological display
+    // Convert ProjectMessage[] to PersistedMessage[] format and reverse to chronological display
     const messages: SequencedMessage[] = result.messages
       .slice()
       .reverse()
       .map((msg) => ({
         id: msg.message_id,
         role: msg.role,
-        content: msg.content as Message['content'],
+        content: msg.content as PersistedMessage['content'],
         createdAt: new Date(msg.created_at),
-        annotations: (msg.annotations as Message['annotations']) || undefined,
+        annotations: (msg.annotations as PersistedMessage['annotations']) || undefined,
         sequence_num: msg.sequence_num, // Preserve sequence_num for proper ordering
       }));
     const chatHistoryItem: ChatHistoryItem = {
@@ -401,7 +400,7 @@ export async function getServerMessages(
       urlId: undefined, // Will be resolved by calling component
       description: undefined, // Project description will be fetched separately
       messages,
-      timestamp: messages[0]?.createdAt?.toISOString() || new Date().toISOString(),
+      timestamp: (messages[0]?.createdAt as Date)?.toISOString() || new Date().toISOString(),
     };
 
     // Emit progress snapshot for recent load
@@ -440,9 +439,9 @@ export async function getServerMessagesPage(
   const messages: SequencedMessage[] = response.messages.map((msg) => ({
     id: msg.message_id,
     role: msg.role,
-    content: msg.content as Message['content'],
+    content: msg.content as PersistedMessage['content'],
     createdAt: new Date(msg.created_at),
-    annotations: msg.annotations as Message['annotations'],
+    annotations: msg.annotations as PersistedMessage['annotations'],
     sequence_num: msg.sequence_num, // Preserve sequence_num for proper ordering
   }));
 
@@ -455,7 +454,7 @@ export async function getServerMessagesPage(
 /**
  * Save chat messages to the server API
  */
-export async function setServerMessages(projectId: string, messages: Message[]): Promise<void> {
+export async function setServerMessages(projectId: string, messages: PersistedMessage[]): Promise<void> {
   try {
     logger.info('Saving messages to server', { projectId, messageCount: messages.length });
 
@@ -468,7 +467,7 @@ export async function setServerMessages(projectId: string, messages: Message[]):
 
       // Extract and normalize annotations (filtering out local-only markers like pending-sync)
       annotations: normalizeAnnotationsForServer(extractMessageAnnotations(msg)),
-      created_at: msg.createdAt?.toISOString() || new Date().toISOString(),
+      created_at: (msg.createdAt as Date)?.toISOString() || new Date().toISOString(),
     }));
 
     const response = await fetch(`/api/projects/${projectId}/messages`, {
@@ -507,7 +506,7 @@ export async function setServerMessages(projectId: string, messages: Message[]):
  */
 export async function appendServerMessages(
   projectId: string,
-  messages: Message[],
+  messages: PersistedMessage[],
 ): Promise<{ inserted_count: number }> {
   try {
     logger.info('Appending messages to server', { projectId, messageCount: messages.length });
@@ -517,7 +516,7 @@ export async function appendServerMessages(
       role: msg.role,
       content: msg.content,
       annotations: normalizeAnnotationsForServer(extractMessageAnnotations(msg)),
-      created_at: msg.createdAt?.toISOString() || new Date().toISOString(),
+      created_at: (msg.createdAt as Date)?.toISOString() || new Date().toISOString(),
     }));
 
     const response = await fetch(`/api/projects/${projectId}/messages/append`, {

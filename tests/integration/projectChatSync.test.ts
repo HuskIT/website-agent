@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 
 // Mock fetch for API calls
 const mockFetch = vi.fn();
@@ -81,7 +81,7 @@ describe('Project Chat Sync Integration Tests', () => {
   /**
    * Helper function to create mock messages
    */
-  function createMockMessages(count: number, startId = 1): Message[] {
+  function createMockMessages(count: number, startId = 1): PersistedMessage[] {
     return Array.from({ length: count }, (_, i) => ({
       id: `msg-${startId + i}`,
       role: i % 2 === 0 ? 'user' : 'assistant',
@@ -371,7 +371,7 @@ describe('Project Chat Sync Integration Tests', () => {
   describe('Annotation preservation', () => {
     it('should preserve annotations when loading from server', async () => {
       // Given: Messages with annotations on server
-      const messagesWithAnnotations: Message[] = [
+      const messagesWithAnnotations: PersistedMessage[] = [
         {
           id: 'msg-1',
           role: 'user',
@@ -387,7 +387,7 @@ describe('Project Chat Sync Integration Tests', () => {
             message_id: m.id,
             role: m.role,
             content: m.content,
-            created_at: m.createdAt?.toISOString(),
+            created_at: m.createdAt instanceof Date ? m.createdAt.toISOString() : m.createdAt,
             annotations: m.annotations,
           })),
           1,
@@ -404,7 +404,7 @@ describe('Project Chat Sync Integration Tests', () => {
 
     it('should strip local-only annotations before sending to server', async () => {
       // Given: Messages with pending-sync marker
-      const messagesWithPendingMarker: Message[] = [
+      const messagesWithPendingMarker: PersistedMessage[] = [
         {
           id: 'msg-1',
           role: 'user',

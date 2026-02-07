@@ -5,7 +5,7 @@
  * From specs/001-load-project-messages/data-model.md
  */
 
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 
 /**
  * Valid message roles according to AI SDK.
@@ -32,7 +32,7 @@ export const VALID_ROLES = ['user', 'assistant', 'system'] as const;
  * }
  * ```
  */
-export function isValidMessage(msg: unknown): msg is Message {
+export function isValidMessage(msg: unknown): msg is PersistedMessage {
   // Must be an object and not null
   if (typeof msg !== 'object' || msg === null) {
     return false;
@@ -80,8 +80,8 @@ export function isValidMessage(msg: unknown): msg is Message {
  * console.log(`Loaded ${validMessages.length} valid messages`);
  * ```
  */
-export function validateMessages(messages: unknown[]): Message[] {
-  return messages.filter((msg): msg is Message => isValidMessage(msg));
+export function validateMessages(messages: unknown[]): PersistedMessage[] {
+  return messages.filter((msg): msg is PersistedMessage => isValidMessage(msg));
 }
 
 /**
@@ -100,7 +100,7 @@ export function isValidRole(role: string): role is 'user' | 'assistant' | 'syste
  * @param msg - The message to check
  * @returns True if the message has no meaningful content
  */
-export function isMessageEmpty(msg: Message): boolean {
+export function isMessageEmpty(msg: PersistedMessage): boolean {
   const content = msg.content;
 
   if (typeof content === 'string') {
@@ -127,7 +127,7 @@ export function isMessageEmpty(msg: Message): boolean {
  * @param msg - The message to check
  * @returns True if the message should be hidden from UI
  */
-export function isMessageHidden(msg: Message): boolean {
+export function isMessageHidden(msg: PersistedMessage): boolean {
   if (!msg.annotations || !Array.isArray(msg.annotations)) {
     return false;
   }
@@ -152,6 +152,6 @@ export function isMessageHidden(msg: Message): boolean {
  * @param msg - The message
  * @returns A valid message ID string
  */
-export function getSafeMessageId(msg: Message): string {
+export function getSafeMessageId(msg: PersistedMessage): string {
   return msg.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
