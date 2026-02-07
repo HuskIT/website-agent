@@ -268,6 +268,9 @@ export default defineConfig((config) => {
     test: {
       environment: 'node',
       setupFiles: ['./vitest.setup.ts'],
+      alias: {
+        '@web3-storage/multipart-parser/esm/src/index.js': '/test/stubs/multipart-parser.ts',
+      },
       deps: {
         inline: [
           'ollama-ai-provider',

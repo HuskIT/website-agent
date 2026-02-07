@@ -74,7 +74,9 @@
       "Bash(test:*)",
       "Bash(./tests/sandbox-mvp-verify.sh:*)",
       "Bash(npx:*)",
-      "Bash(pnpm install:*)"
+      "Bash(pnpm install:*)",
+      "Bash(xargs:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []
