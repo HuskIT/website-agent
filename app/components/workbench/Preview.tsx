@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@nanostores/react';
 import { IconButton } from '~/components/ui/IconButton';
 import { workbenchStore } from '~/lib/stores/workbench';
@@ -73,6 +73,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const [displayPath, setDisplayPath] = useState('/');
   const [iframeUrl, setIframeUrl] = useState<string | undefined>();
   const [serverReady, setServerReady] = useState(true);
+  const [isVercelPreview, setIsVercelPreview] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isInspectorMode, setIsInspectorMode] = useState(false);
   const [isDeviceModeOn, setIsDeviceModeOn] = useState(false);
@@ -104,43 +105,126 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
       setIframeUrl(undefined);
       setDisplayPath('/');
       setServerReady(true);
+      setIsVercelPreview(false);
 
       return;
     }
 
     const { baseUrl, provider } = activePreview;
 
-    /*
-     * For Vercel Sandbox, use a proxy route without COEP headers to avoid
-     * ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep errors.
-     * The main workbench has COEP headers for WebContainer, but Vercel Sandbox
-     * doesn't have compatible CORS headers.
-     */
-    if (provider === 'vercel') {
-      // Use proxy route that doesn't have COEP headers
-      const proxyUrl = `/webcontainer/vercel-preview?url=${encodeURIComponent(baseUrl)}`;
-      console.log('[Preview] 🔄 Using proxy URL for Vercel Sandbox:', { baseUrl, proxyUrl });
-      setIframeUrl(proxyUrl);
-    } else {
-      // WebContainer uses direct URL
-      console.log('[Preview] 📡 Using direct URL for WebContainer:', { baseUrl });
-      setIframeUrl(baseUrl);
-    }
-
     setDisplayPath('/');
 
-    /*
-     * IMPORTANT: Skip client-side polling to avoid COEP errors.
-     *
-     * For Vercel Sandbox: Client-side fetch() triggers COEP errors
-     * (ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep)
-     * because the workbench has COEP headers but Vercel URLs don't have
-     * compatible CORS headers. The proxy route handles loading state internally.
-     *
-     * For WebContainer: Already gates previews on its own server-ready event.
-     */
+    if (provider === 'vercel') {
+      /*
+       * For Vercel Sandbox, load the sandbox URL directly in the iframe
+       * with the `credentialless` attribute. This bypasses COEP restrictions
+       * without needing a proxy route.
+       *
+       * serverReady starts false — a health-check polling effect will flip
+       * it to true once the dev server inside the sandbox is responding.
+       */
+      console.log('[Preview] Using credentialless iframe for Vercel Sandbox:', { baseUrl });
+      setIframeUrl(baseUrl);
+      setIsVercelPreview(true);
+      setServerReady(false);
+
+      return;
+    }
+
+    // WebContainer uses direct URL — already gates on its own server-ready event
+    console.log('[Preview] Using direct URL for WebContainer:', { baseUrl });
+    setIframeUrl(baseUrl);
+    setIsVercelPreview(false);
     setServerReady(true);
   }, [activePreview]);
+
+  /*
+   * Apply the `credentialless` attribute on the iframe DOM element to bypass
+   * COEP (Cross-Origin-Embedder-Policy: require-corp) for Vercel sandbox URLs.
+   *
+   * useLayoutEffect ensures the attribute is set synchronously after DOM update
+   * but before the browser paints / starts loading the iframe src.
+   *
+   * Dependencies include device-mode flags because switching between device-frame
+   * and regular iframe creates a new DOM element (the ref changes).
+   */
+  useLayoutEffect(() => {
+    const iframe = iframeRef.current;
+
+    if (!iframe) {
+      return;
+    }
+
+    if (isVercelPreview) {
+      iframe.setAttribute('credentialless', '');
+    } else {
+      iframe.removeAttribute('credentialless');
+    }
+  }, [isVercelPreview, isDeviceModeOn, showDeviceFrameInPreview]);
+
+  /*
+   * Poll the server-side health check endpoint for Vercel sandbox previews.
+   * The dev server may not be ready when the preview URL is first registered.
+   * We poll every 2 seconds until the health check confirms the Vite/Next.js
+   * dev server is responding, then set serverReady=true to load the iframe.
+   */
+  useEffect(() => {
+    if (!isVercelPreview || !iframeUrl) {
+      return;
+    }
+
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30; // 30 × 2s = 60s max wait
+
+    const poll = async () => {
+      attempts++;
+
+      if (attempts > MAX_ATTEMPTS) {
+        console.warn('[Preview] Health check timed out, loading iframe anyway');
+
+        if (active) {
+          setServerReady(true);
+        }
+
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/sandbox/health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: iframeUrl }),
+        });
+        const data = (await res.json()) as { ready?: boolean };
+
+        console.log(`[Preview] Health check #${attempts}:`, data);
+
+        if (data.ready && active) {
+          console.log('[Preview] Vercel dev server is ready, loading iframe');
+          setServerReady(true);
+
+          return;
+        }
+      } catch {
+        // Fetch failed (network error, etc.) — will retry
+      }
+
+      if (active) {
+        timer = setTimeout(poll, 2000);
+      }
+    };
+
+    // Start polling after a short initial delay
+    timer = setTimeout(poll, 2000);
+
+    // eslint-disable-next-line consistent-return
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isVercelPreview, iframeUrl]);
 
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {
@@ -1309,8 +1393,12 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                           display: 'block',
                         }}
                         src={serverReady ? iframeUrl : undefined}
-                        sandbox="allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin"
-                        allow="cross-origin-isolated"
+                        sandbox={
+                          !isVercelPreview
+                            ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
+                            : undefined
+                        }
+                        allow={!isVercelPreview ? 'cross-origin-isolated' : undefined}
                       />
                     </div>
                   </div>
@@ -1320,8 +1408,16 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                     title="preview"
                     className="border-none w-full h-full bg-bolt-elements-background-depth-1"
                     src={serverReady ? iframeUrl : undefined}
-                    sandbox="allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin"
-                    allow="geolocation; ch-ua-full-version-list; cross-origin-isolated; screen-wake-lock; publickey-credentials-get; shared-storage-select-url; ch-ua-arch; bluetooth; compute-pressure; ch-prefers-reduced-transparency; deferred-fetch; usb; ch-save-data; publickey-credentials-create; shared-storage; deferred-fetch-minimal; run-ad-auction; ch-ua-form-factors; ch-downlink; otp-credentials; payment; ch-ua; ch-ua-model; ch-ect; autoplay; camera; private-state-token-issuance; accelerometer; ch-ua-platform-version; idle-detection; private-aggregation; interest-cohort; ch-viewport-height; local-fonts; ch-ua-platform; midi; ch-ua-full-version; xr-spatial-tracking; clipboard-read; gamepad; display-capture; keyboard-map; join-ad-interest-group; ch-width; ch-prefers-reduced-motion; browsing-topics; encrypted-media; gyroscope; serial; ch-rtt; ch-ua-mobile; window-management; unload; ch-dpr; ch-prefers-color-scheme; ch-ua-wow64; attribution-reporting; fullscreen; identity-credentials-get; private-state-token-redemption; hid; ch-ua-bitness; storage-access; sync-xhr; ch-device-memory; ch-viewport-width; picture-in-picture; magnetometer; clipboard-write; microphone"
+                    sandbox={
+                      !isVercelPreview
+                        ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
+                        : undefined
+                    }
+                    allow={
+                      !isVercelPreview
+                        ? 'geolocation; ch-ua-full-version-list; cross-origin-isolated; screen-wake-lock; publickey-credentials-get; shared-storage-select-url; ch-ua-arch; bluetooth; compute-pressure; ch-prefers-reduced-transparency; deferred-fetch; usb; ch-save-data; publickey-credentials-create; shared-storage; deferred-fetch-minimal; run-ad-auction; ch-ua-form-factors; ch-downlink; otp-credentials; payment; ch-ua; ch-ua-model; ch-ect; autoplay; camera; private-state-token-issuance; accelerometer; ch-ua-platform-version; idle-detection; private-aggregation; interest-cohort; ch-viewport-height; local-fonts; ch-ua-platform; midi; ch-ua-full-version; xr-spatial-tracking; clipboard-read; gamepad; display-capture; keyboard-map; join-ad-interest-group; ch-width; ch-prefers-reduced-motion; browsing-topics; encrypted-media; gyroscope; serial; ch-rtt; ch-ua-mobile; window-management; unload; ch-dpr; ch-prefers-color-scheme; ch-ua-wow64; attribution-reporting; fullscreen; identity-credentials-get; private-state-token-redemption; hid; ch-ua-bitness; storage-access; sync-xhr; ch-device-memory; ch-viewport-width; picture-in-picture; magnetometer; clipboard-write; microphone'
+                        : undefined
+                    }
                   />
                 )}
                 <ScreenshotSelector

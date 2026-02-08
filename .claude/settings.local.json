@@ -76,7 +76,8 @@
       "Bash(npx:*)",
       "Bash(pnpm install:*)",
       "Bash(xargs:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(pnpm vitest:*)"
     ],
     "deny": [],
     "ask": []
