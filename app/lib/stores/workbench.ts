@@ -389,7 +389,13 @@ export class WorkbenchStore {
 
     // Listen for file changes from provider (sync back to store)
     provider.onFileChange((event) => {
-      logger.debug('File change from provider', event);
+      // Defensive: don't log content even if it arrives (can be very large)
+      logger.debug('File change from provider', {
+        type: event.type,
+        path: event.path,
+        hasContent: !!event.content && event.content.length > 0,
+        contentLength: event.content?.length,
+      });
 
       /*
        * Note: The store already updates via WebContainer watcher for local

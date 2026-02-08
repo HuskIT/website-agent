@@ -259,14 +259,11 @@ export class VercelSandboxProvider implements SandboxProvider {
       throw new Error(errorData.error || 'Failed to write files');
     }
 
-    // Emit file change events
-    for (const file of files) {
-      this._emitFileChange({
-        type: 'change',
-        path: file.path,
-        content: file.content.toString('utf-8'),
-      });
-    }
+    /*
+     * Don't emit file change events for local writes
+     * The store already knows about these files (it initiated the write)
+     * File change events should only be emitted for external changes (git pull, collaborative edit)
+     */
   }
 
   /**
