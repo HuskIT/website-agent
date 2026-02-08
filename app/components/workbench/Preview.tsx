@@ -240,10 +240,40 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
     }
   }, [previews, findMinPortIndex]);
 
-  const reloadPreview = () => {
-    if (iframeRef.current) {
-      iframeRef.current.src = iframeRef.current.src;
+  const reloadPreview = async () => {
+    if (!iframeRef.current) {
+      return;
     }
+
+    // For Vercel previews, check sandbox health before reloading
+    if (isVercelPreview && iframeUrl) {
+      try {
+        const res = await fetch('/api/sandbox/health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: iframeUrl }),
+        });
+        const data = (await res.json()) as { ready?: boolean };
+
+        if (data.ready) {
+          // Sandbox alive — simple reload
+          iframeRef.current.src = iframeRef.current.src;
+          return;
+        }
+      } catch {
+        // Health check failed — sandbox likely dead
+      }
+
+      // Sandbox dead — trigger recreation and re-engage health polling
+      console.log('[Preview] Sandbox appears dead, triggering recreation');
+      setServerReady(false);
+      workbenchStore.recreateSandbox();
+
+      return;
+    }
+
+    // WebContainer or non-Vercel — simple reload
+    iframeRef.current.src = iframeRef.current.src;
   };
 
   const toggleFullscreen = async () => {

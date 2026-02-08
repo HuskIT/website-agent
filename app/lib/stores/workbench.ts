@@ -40,10 +40,6 @@ function createChunksStrict(
   let currentSize = 0;
 
   for (const file of files) {
-    if (files.indexOf(file) === 0) {
-      console.log('[DEBUG createChunks] 🔒 Conservative Chunking Active: Max 20 files');
-    }
-
     // If single file exceeds limit, upload it alone (will likely fail but we try)
     if (file.size > maxChunkSize) {
       if (currentChunk.length > 0) {
@@ -57,10 +53,11 @@ function createChunksStrict(
     }
 
     /*
-     * If adding this file would exceed limit OR file count limit (20), start new chunk
-     * Vercel Sandbox sometimes chokes on too many file handles at once
+     * If adding this file would exceed byte limit OR file count limit, start new chunk.
+     * Vercel Sandbox API has a 4 MB request limit — we target 3 MB to leave headroom.
+     * File count capped at 50 to avoid excessive file-handle churn on the sandbox.
      */
-    const MAX_FILES_PER_CHUNK = 20;
+    const MAX_FILES_PER_CHUNK = 50;
 
     if (
       (currentSize + file.size > maxChunkSize || currentChunk.length >= MAX_FILES_PER_CHUNK) &&
@@ -409,12 +406,12 @@ export class WorkbenchStore {
 
         if (response.ok) {
           const project = (await response.json()) as {
-            sandboxId?: string | null;
-            sandboxProvider?: SandboxProviderType | null;
+            sandbox_id?: string | null;
+            sandbox_provider?: SandboxProviderType | null;
             user_id?: string;
           };
-          sandboxId = project.sandboxId ?? null;
-          sandboxProvider = project.sandboxProvider ?? null;
+          sandboxId = project.sandbox_id ?? null;
+          sandboxProvider = project.sandbox_provider ?? null;
 
           // Use project's user_id if userId not provided
           if (!userId && project.user_id) {
@@ -490,33 +487,73 @@ export class WorkbenchStore {
           this._setupTimeoutManager(provider, projectId, effectiveUserId);
 
           /*
-           * CRITICAL: Restore files from database snapshot even on reconnect
-           * This ensures all files are uploaded to the sandbox with proper chunking
+           * Smart reconnection: check if the dev server is already running.
+           * If it is, skip the full file re-upload + npm install + dev start cycle
+           * and just populate the local editor file store.
            */
-          console.log('🔥 Reconnected successfully, calling restoreFromDatabaseSnapshot');
+          console.log('🔥 Reconnected successfully, checking if dev server is already running');
+
+          let sandboxAlreadyRunning = false;
 
           try {
-            const restored = await this.restoreFromDatabaseSnapshot();
+            const previewUrls = provider.getPreviewUrls();
+            const firstUrl = previewUrls.values().next().value as string | undefined;
 
-            if (restored) {
-              logger.info('Files restored from snapshot after reconnect');
-            } else {
-              // No snapshot to restore, just sync current state
-              this.saveSnapshotToDatabase()
-                .then(() => {
-                  logger.info('Snapshot synced to Supabase after reconnect');
-                })
-                .catch((error) => {
-                  logger.warn('Failed to sync snapshot after reconnect', { error });
-                });
+            if (firstUrl) {
+              const healthRes = await fetch('/api/sandbox/health', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: firstUrl }),
+              });
+              const healthData = (await healthRes.json()) as { ready?: boolean };
+
+              if (healthData.ready) {
+                sandboxAlreadyRunning = true;
+                logger.info('Sandbox dev server already running, skipping full restore', { sandboxId });
+                console.log('🔥 Sandbox already running — skipping file upload + npm install');
+
+                // Populate editor file tree from DB snapshot (no upload)
+                await this.#loadSnapshotIntoFileStore();
+
+                // Register preview URLs so the iframe picks them up
+                for (const [port, url] of previewUrls) {
+                  this.#previewsStore.registerPreview(port, url, 'vercel');
+                }
+
+                this.loadingStatus.set(null);
+              }
             }
-          } catch (restoreError) {
-            logger.warn('Failed to restore from snapshot after reconnect', restoreError);
-
-            // Fall back to saving current state
-            this.saveSnapshotToDatabase().catch((error) => {
-              logger.warn('Failed to sync snapshot after reconnect', { error });
+          } catch (healthError) {
+            logger.warn('Health check failed during smart reconnect, falling back to full restore', {
+              error: healthError,
             });
+          }
+
+          // If sandbox wasn't already running, do the full restore
+          if (!sandboxAlreadyRunning) {
+            try {
+              const restored = await this.restoreFromDatabaseSnapshot();
+
+              if (restored) {
+                logger.info('Files restored from snapshot after reconnect');
+              } else {
+                // No snapshot to restore, just sync current state
+                this.saveSnapshotToDatabase()
+                  .then(() => {
+                    logger.info('Snapshot synced to Supabase after reconnect');
+                  })
+                  .catch((error) => {
+                    logger.warn('Failed to sync snapshot after reconnect', { error });
+                  });
+              }
+            } catch (restoreError) {
+              logger.warn('Failed to restore from snapshot after reconnect', restoreError);
+
+              // Fall back to saving current state
+              this.saveSnapshotToDatabase().catch((error) => {
+                logger.warn('Failed to sync snapshot after reconnect', { error });
+              });
+            }
           }
 
           return { success: true, provider, restored: true };
@@ -875,6 +912,24 @@ export class WorkbenchStore {
   }
 
   /**
+   * Public wrapper around #recreateSandbox() with the #isRecreating guard.
+   * Called from Preview.tsx when the refresh button detects a dead sandbox.
+   */
+  async recreateSandbox(): Promise<void> {
+    if (this.#isRecreating) {
+      logger.warn('Sandbox recreation already in progress');
+      return;
+    }
+
+    try {
+      this.#isRecreating = true;
+      await this.#recreateSandbox();
+    } finally {
+      this.#isRecreating = false;
+    }
+  }
+
+  /**
    * Switch the sandbox provider for the current project.
    * Disconnects the current provider and initializes a new one.
    *
@@ -1014,6 +1069,82 @@ export class WorkbenchStore {
     }
 
     logger.info('Snapshot saved successfully', { projectId, fileCount });
+  }
+
+  /**
+   * Populate the local editor file store from the database snapshot WITHOUT
+   * uploading to the sandbox or starting a dev server.
+   *
+   * Used during smart reconnection: when the sandbox is already running,
+   * we only need the editor to have the files — no need to re-upload.
+   */
+  async #loadSnapshotIntoFileStore(): Promise<boolean> {
+    const projectId = this.#currentProjectId;
+
+    if (!projectId) {
+      return false;
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/snapshot`);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          logger.info('No snapshot found for project (loadSnapshotIntoFileStore)', { projectId });
+        }
+
+        return false;
+      }
+
+      const snapshot = (await response.json()) as {
+        files: Record<string, { content: string; isBinary: boolean; type?: string }>;
+        updated_at: string;
+      };
+
+      if (!snapshot.files || Object.keys(snapshot.files).length === 0) {
+        return false;
+      }
+
+      this.#lastKnownSnapshotUpdatedAt = snapshot.updated_at;
+      this.#sessionStartedAt = Date.now();
+
+      // Build file map with parent directories for file-tree UI
+      const fileMap: Record<
+        string,
+        { type: 'file'; content: string; isBinary: boolean; isLocked: boolean } | { type: 'folder' }
+      > = {};
+
+      for (const [filePath, fileData] of Object.entries(snapshot.files)) {
+        const parts = filePath.split('/');
+
+        for (let i = 1; i < parts.length; i++) {
+          const dirPath = parts.slice(0, i).join('/');
+
+          if (!fileMap[dirPath]) {
+            fileMap[dirPath] = { type: 'folder' };
+          }
+        }
+
+        if (fileData.type === 'folder' || (fileData.content === '' && !filePath.includes('.'))) {
+          if (!fileMap[filePath]) {
+            fileMap[filePath] = { type: 'folder' };
+          }
+        } else {
+          fileMap[filePath] = { type: 'file', content: fileData.content, isBinary: fileData.isBinary, isLocked: false };
+        }
+      }
+
+      this.#filesStore.files.set(fileMap);
+      logger.info('File store populated from snapshot (skip-upload path)', {
+        projectId,
+        fileCount: Object.keys(snapshot.files).length,
+      });
+
+      return true;
+    } catch (error) {
+      logger.error('Failed to load snapshot into file store', { error, projectId });
+      return false;
+    }
   }
 
   /**
@@ -1215,7 +1346,7 @@ export class WorkbenchStore {
             : null,
         });
 
-        const chunks = createChunksStrict(apiFiles, 512 * 1024);
+        const chunks = createChunksStrict(apiFiles, 3 * 1024 * 1024);
 
         this.loadingStatus.set(`Syncing to Sandbox (v3 - Fresh, ${chunks.length} batches)...`);
 
@@ -1309,13 +1440,11 @@ export class WorkbenchStore {
             console.log(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
 
             /*
-             * Add a substantial delay between chunks (1 second)
-             * This prevents "bursty" traffic that might trigger rate limiters or race conditions
+             * Short pause between chunks to avoid burst rate-limiting.
+             * 200ms is enough to let the sandbox flush writes without wasting time.
              */
             if (i < chunks.length - 1) {
-              console.log(`[DEBUG restoreFromDatabaseSnapshot] Waiting 1s before next chunk...`);
-              await new Promise((resolve) => setTimeout(resolve, 1000));
-              console.log(`[DEBUG restoreFromDatabaseSnapshot] Resumed after wait.`);
+              await new Promise((resolve) => setTimeout(resolve, 200));
             }
           } catch (writeError) {
             console.error(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} FAILED:`, writeError);
@@ -1480,7 +1609,22 @@ export class WorkbenchStore {
        * Fire-and-forget: do NOT await – dev servers run indefinitely.
        * The preview polling in Preview.tsx will detect when the port is ready.
        */
-      provider.runCommand('sh', devArgs);
+      provider.runCommand('sh', devArgs).catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
+
+        if (is410 && !this.#isRecreating) {
+          logger.warn('Dev server sandbox expired, triggering recreation');
+          this.#isRecreating = true;
+          this.#recreateSandbox()
+            .catch((e) => logger.error('Failed to recreate after dev server expiry', e))
+            .finally(() => {
+              this.#isRecreating = false;
+            });
+        } else if (!is410) {
+          logger.error('Dev server command failed unexpectedly', { error: msg });
+        }
+      });
       console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
 
       // NOW register previews — dev server is starting, so the iframe can begin polling
