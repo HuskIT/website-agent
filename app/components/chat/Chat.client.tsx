@@ -66,7 +66,7 @@ function uiMessageToPersisted(msg: UIMessage): PersistedMessage {
         .filter((p): p is TextUIPart => p.type === 'text')
         .map((p) => p.text)
         .join('')
-    : (msg as any).content ?? '';
+    : ((msg as any).content ?? '');
 
   return {
     id: msg.id,
@@ -189,9 +189,7 @@ const processSampledMessages = createSampler(
         return !annotations.includes('hidden') && !annotations.includes('no-store');
       });
 
-      storeMessageHistory(unsyncedMessages.map(uiMessageToPersisted)).catch((error) =>
-        toast.error(error.message),
-      );
+      storeMessageHistory(unsyncedMessages.map(uiMessageToPersisted)).catch((error) => toast.error(error.message));
     }
   },
   50,

@@ -128,9 +128,11 @@ export async function streamText(props: {
     return newMessage;
   });
 
-  // Filter out empty assistant placeholder messages before converting to model format
-  // AI SDK v6 creates these during streaming; LLM providers reject empty assistant messages
-  // Check both 'content' (LegacyMessage field) and 'parts' (UIMessage field) for robustness
+  /*
+   * Filter out empty assistant placeholder messages before converting to model format
+   * AI SDK v6 creates these during streaming; LLM providers reject empty assistant messages
+   * Check both 'content' (LegacyMessage field) and 'parts' (UIMessage field) for robustness
+   */
   processedMessages = processedMessages.filter((msg) => {
     if (msg.role === 'assistant') {
       // Check parts for meaningful text content
@@ -378,10 +380,12 @@ ${themePrompt}
     ),
   );
 
-  // Strip 'step-start' parts from messages before convertToModelMessages.
-  // AI SDK v6 inserts step-start parts during multi-step streaming (e.g., tool use).
-  // convertToModelMessages splits assistant messages at step-start boundaries, which can
-  // produce empty assistant model messages that LLM providers reject.
+  /*
+   * Strip 'step-start' parts from messages before convertToModelMessages.
+   * AI SDK v6 inserts step-start parts during multi-step streaming (e.g., tool use).
+   * convertToModelMessages splits assistant messages at step-start boundaries, which can
+   * produce empty assistant model messages that LLM providers reject.
+   */
   const messagesForConversion = processedMessages.map((msg) => {
     if (msg.role === 'assistant' && Array.isArray(msg.parts)) {
       const filteredParts = msg.parts.filter((p: any) => p.type !== 'step-start');

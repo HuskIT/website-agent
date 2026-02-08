@@ -127,9 +127,7 @@ export function isMessageEmpty(msg: PersistedMessage): boolean {
   const parts = (msg as any).parts;
 
   if (Array.isArray(parts)) {
-    return !parts.some(
-      (p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0,
-    );
+    return !parts.some((p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0);
   }
 
   return true;
