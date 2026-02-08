@@ -313,9 +313,11 @@ export class WorkbenchStore {
       this.#fileSyncManager.setProvider(provider);
       this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
-      // Listen for preview ready events — store URLs but DON'T register yet.
-      // Registration happens in #autoStartDevServer after the dev server launches,
-      // preventing the iframe from loading before there's anything to show.
+      /*
+       * Listen for preview ready events — store URLs but DON'T register yet.
+       * Registration happens in #autoStartDevServer after the dev server launches,
+       * preventing the iframe from loading before there's anything to show.
+       */
       provider.onPreviewReady((port, url) => {
         logger.info('Preview URL available (deferred registration)', { port, url });
       });
@@ -745,9 +747,7 @@ export class WorkbenchStore {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         const is410Error =
-          errorMessage.includes('410') ||
-          errorMessage.includes('expired') ||
-          errorMessage.includes('SANDBOX_EXPIRED');
+          errorMessage.includes('410') || errorMessage.includes('expired') || errorMessage.includes('SANDBOX_EXPIRED');
 
         if (is410Error && attempt < maxRetries) {
           logger.warn('Sandbox expired during command, recreating', { cmd, attempt, error: errorMessage });
@@ -833,11 +833,7 @@ export class WorkbenchStore {
       // 3. Create new sandbox
       this.loadingStatus.set('Creating new sandbox...');
 
-      const newProvider = await this.initializeProvider(
-        this.#currentProviderType,
-        projectId,
-        userId || 'anonymous',
-      );
+      const newProvider = await this.initializeProvider(this.#currentProviderType, projectId, userId || 'anonymous');
 
       logger.info('New sandbox created', {
         projectId,
@@ -1298,8 +1294,10 @@ export class WorkbenchStore {
                   }
                 }
 
-                // #recreateSandbox calls restoreFromDatabaseSnapshot internally,
-                // so we return true here — the restore will continue in the recursive call
+                /*
+                 * #recreateSandbox calls restoreFromDatabaseSnapshot internally,
+                 * so we return true here — the restore will continue in the recursive call
+                 */
                 return true;
               }
 
@@ -1436,8 +1434,10 @@ export class WorkbenchStore {
     });
 
     try {
-      // Await install so dependencies are available before starting the server
-      // Use retry wrapper to handle sandbox expiration during long-running install
+      /*
+       * Await install so dependencies are available before starting the server
+       * Use retry wrapper to handle sandbox expiration during long-running install
+       */
       console.log('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
 
       const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);

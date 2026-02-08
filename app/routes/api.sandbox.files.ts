@@ -96,19 +96,24 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
-      return json(
-        { error: 'Sandbox expired', code: 'SANDBOX_EXPIRED', shouldRecreate: true },
-        { status: 410 },
-      );
+      return json({ error: 'Sandbox expired', code: 'SANDBOX_EXPIRED', shouldRecreate: true }, { status: 410 });
     }
 
     // Prepare files for writing (SDK expects Array<{ path: string; content: Buffer }>)
     const filesToWrite: Array<{ path: string; content: Buffer }> = [];
 
     for (const file of files) {
+      // Vercel SDK expects relative paths (no leading /)
+      const normalizedPath = file.path.replace(/^\/+/, '');
+
+      if (!normalizedPath) {
+        logger.warn('Skipping file with empty path after normalization', { originalPath: file.path });
+        continue;
+      }
+
       const content =
         file.encoding === 'base64' ? Buffer.from(file.content, 'base64') : Buffer.from(file.content, 'utf-8');
-      filesToWrite.push({ path: file.path, content });
+      filesToWrite.push({ path: normalizedPath, content });
     }
 
     // Write files to sandbox

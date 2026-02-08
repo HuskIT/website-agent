@@ -38,8 +38,10 @@ export default function VercelSandboxPreview() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the iframe directly — preview registration is deferred until the dev
-  // server starts, so the sandbox URL should be serving content by now.
+  /*
+   * Load the iframe directly — preview registration is deferred until the dev
+   * server starts, so the sandbox URL should be serving content by now.
+   */
   useEffect(() => {
     if (iframeRef.current) {
       console.log('[VercelPreview] Loading sandbox URL:', sandboxUrl);
