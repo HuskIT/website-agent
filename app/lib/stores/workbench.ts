@@ -106,6 +106,10 @@ export class WorkbenchStore {
   #fileSyncManager: FileSyncManager | null = null;
   #timeoutManager: TimeoutManager | null = null;
   #isRecreating = false; // Prevent concurrent sandbox recreations
+  #lastUserInteractionAt = 0; // Timestamp of last real DOM interaction
+  #recreationCount = 0; // Consecutive auto-recreations without user activity
+  #domActivityCleanup: (() => void) | null = null; // DOM listener cleanup
+  #activityTrackingStarted = false; // Prevent double-attaching DOM listeners
 
   // Project state for reconnection
   #currentProjectId: string | null = null;
@@ -335,6 +339,9 @@ export class WorkbenchStore {
 
     logger.info('Sandbox provider initialized', { providerType, sandboxId: provider.sandboxId });
 
+    // Start DOM activity tracking for idle cost protection
+    this.#startUserActivityTracking();
+
     return provider;
   }
 
@@ -370,6 +377,10 @@ export class WorkbenchStore {
       this.#filesStore.setFileSyncManager(null);
       this.#currentProjectId = null;
       this.#currentUserId = null;
+
+      // Clean up DOM activity listeners
+      this.#domActivityCleanup?.();
+      this.#domActivityCleanup = null;
     }
   }
 
@@ -472,6 +483,9 @@ export class WorkbenchStore {
           logger.info('Successfully reconnected to existing sandbox', { sandboxId });
 
           this.#sandboxProvider = provider;
+
+          // Start DOM activity tracking for idle cost protection
+          this.#startUserActivityTracking();
 
           // Set up FileSyncManager
           this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 300 });
@@ -762,6 +776,65 @@ export class WorkbenchStore {
   }
 
   /**
+   * Start tracking real user interactions via DOM events.
+   * Updates #lastUserInteractionAt and resets the consecutive recreation counter
+   * whenever the user interacts with the page.
+   */
+  #startUserActivityTracking(): void {
+    if (this.#activityTrackingStarted || typeof document === 'undefined') {
+      return;
+    }
+
+    this.#activityTrackingStarted = true;
+    this.#lastUserInteractionAt = Date.now();
+
+    const onActivity = () => {
+      this.#lastUserInteractionAt = Date.now();
+      this.#recreationCount = 0;
+      this.recordActivity('user_interaction');
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'] as const;
+
+    for (const e of events) {
+      document.addEventListener(e, onActivity, { passive: true });
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        this.#lastUserInteractionAt = Date.now();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+
+    this.#domActivityCleanup = () => {
+      for (const e of events) {
+        document.removeEventListener(e, onActivity);
+      }
+
+      document.removeEventListener('visibilitychange', onVisibility);
+      this.#activityTrackingStarted = false;
+    };
+  }
+
+  /**
+   * Check if the user has been active recently.
+   * Returns false if the tab is hidden or the user hasn't interacted within the threshold.
+   */
+  #isUserActive(thresholdMs = 2 * 60 * 1000): boolean {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return false;
+    }
+
+    if (this.#lastUserInteractionAt === 0) {
+      return false;
+    }
+
+    return Date.now() - this.#lastUserInteractionAt < thresholdMs;
+  }
+
+  /**
    * Run a sandbox command with automatic retry on 410 (expired) errors.
    * If the sandbox expired, recreates it and retries the command once.
    */
@@ -920,6 +993,10 @@ export class WorkbenchStore {
       logger.warn('Sandbox recreation already in progress');
       return;
     }
+
+    // User-initiated: reset idle counters so activity gate doesn't block
+    this.#lastUserInteractionAt = Date.now();
+    this.#recreationCount = 0;
 
     try {
       this.#isRecreating = true;
@@ -1413,7 +1490,23 @@ export class WorkbenchStore {
 
               // If sandbox expired during upload, recreate and restart the entire restore
               if (response.status === 410 || errorData.code === 'SANDBOX_EXPIRED') {
-                logger.warn('Sandbox expired during file upload, recreating', { chunkIndex: i });
+                // Idle cost protection: don't auto-recreate if user is away
+                if (!this.#isUserActive()) {
+                  logger.info('Sandbox expired during upload but user is idle — not recreating');
+                  throw new Error('Sandbox expired while user is idle');
+                }
+
+                this.#recreationCount++;
+
+                if (this.#recreationCount > 2) {
+                  logger.warn('Too many consecutive recreations during upload, stopping');
+                  throw new Error('Sandbox expired repeatedly — click Refresh to restart');
+                }
+
+                logger.warn('Sandbox expired during file upload, recreating', {
+                  chunkIndex: i,
+                  recreationCount: this.#recreationCount,
+                });
 
                 if (!this.#isRecreating) {
                   this.#isRecreating = true;
@@ -1614,7 +1707,34 @@ export class WorkbenchStore {
         const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
 
         if (is410 && !this.#isRecreating) {
-          logger.warn('Dev server sandbox expired, triggering recreation');
+          // Idle cost protection: don't auto-recreate if user is away
+          if (!this.#isUserActive()) {
+            logger.info('Sandbox expired but user is idle — not recreating');
+            this.actionAlert.set({
+              type: 'warning',
+              title: 'Session Expired',
+              description: 'Your sandbox session expired while you were away. Click Refresh to restart.',
+              content: '',
+            });
+
+            return;
+          }
+
+          this.#recreationCount++;
+
+          if (this.#recreationCount > 2) {
+            logger.warn('Too many consecutive recreations, stopping', { count: this.#recreationCount });
+            this.actionAlert.set({
+              type: 'warning',
+              title: 'Session Expired',
+              description: 'Your sandbox has expired multiple times. Click Refresh to restart.',
+              content: '',
+            });
+
+            return;
+          }
+
+          logger.warn('Dev server sandbox expired, triggering recreation', { count: this.#recreationCount });
           this.#isRecreating = true;
           this.#recreateSandbox()
             .catch((e) => logger.error('Failed to recreate after dev server expiry', e))
