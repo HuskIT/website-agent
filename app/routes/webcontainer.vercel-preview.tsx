@@ -11,6 +11,9 @@ import { useEffect, useRef, useState } from 'react';
  *
  * By loading the Vercel Sandbox in this separate route (which has no COEP headers),
  * we can embed it in the main workbench iframe without CORS issues.
+ *
+ * Preview registration is deferred in workbench.ts until after the dev server starts,
+ * so by the time this route loads the iframe, the dev server should be starting up.
  */
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -33,62 +36,16 @@ export default function VercelSandboxPreview() {
   const { sandboxUrl } = useLoaderData<typeof loader>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pollingAttempts, setPollingAttempts] = useState(0);
 
-  // Poll the Vercel Sandbox URL until it's ready
+  // Load the iframe directly — preview registration is deferred until the dev
+  // server starts, so the sandbox URL should be serving content by now.
   useEffect(() => {
-    if (!isPolling) {
-      return undefined;
+    if (iframeRef.current) {
+      console.log('[VercelPreview] Loading sandbox URL:', sandboxUrl);
+      iframeRef.current.src = sandboxUrl;
     }
-
-    let cancelled = false;
-    const MAX_ATTEMPTS = 90; // 3 minutes at 2s intervals
-
-    async function pollServer() {
-      if (cancelled || pollingAttempts >= MAX_ATTEMPTS) {
-        if (!cancelled && pollingAttempts >= MAX_ATTEMPTS) {
-          setError('Dev server took too long to start. It may have failed.');
-          setIsPolling(false);
-          setIsLoading(false);
-        }
-
-        return;
-      }
-
-      try {
-        // Try to fetch the sandbox URL to check if it's ready
-        await fetch(sandboxUrl, {
-          mode: 'no-cors', // Bypass CORS - we just want to check if it responds
-          signal: AbortSignal.timeout(5000),
-        });
-
-        // If fetch succeeds, server is ready - load the iframe
-        if (!cancelled) {
-          console.log('[VercelPreview] Server is ready, loading iframe');
-          setIsPolling(false);
-
-          if (iframeRef.current) {
-            iframeRef.current.src = sandboxUrl;
-          }
-        }
-      } catch (_ignored) {
-        // Server not ready yet, retry after 2 seconds
-        if (!cancelled) {
-          setPollingAttempts((prev) => prev + 1);
-          setTimeout(pollServer, 2000);
-        }
-      }
-    }
-
-    console.log('[VercelPreview] Starting to poll server:', sandboxUrl);
-    pollServer();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sandboxUrl, isPolling, pollingAttempts]);
+  }, [sandboxUrl]);
 
   const handleLoad = () => {
     setIsLoading(false);
@@ -105,14 +62,7 @@ export default function VercelSandboxPreview() {
       {isLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 z-10">
           <div className="w-8 h-8 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />
-          <div className="mt-4 text-gray-600 dark:text-gray-400 text-sm font-medium">
-            {isPolling ? 'Waiting for dev server to start...' : 'Loading preview...'}
-          </div>
-          {isPolling && pollingAttempts > 0 && (
-            <div className="mt-2 text-gray-500 dark:text-gray-500 text-xs">
-              Attempt {pollingAttempts} / 90 (this may take 1-2 minutes)
-            </div>
-          )}
+          <div className="mt-4 text-gray-600 dark:text-gray-400 text-sm font-medium">Loading preview...</div>
         </div>
       )}
 
@@ -123,8 +73,10 @@ export default function VercelSandboxPreview() {
             onClick={() => {
               setError(null);
               setIsLoading(true);
-              setIsPolling(true);
-              setPollingAttempts(0);
+
+              if (iframeRef.current) {
+                iframeRef.current.src = sandboxUrl;
+              }
             }}
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >

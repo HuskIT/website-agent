@@ -300,6 +300,12 @@ export interface SandboxProvider {
   getPreviewUrl(port: number): string | null;
 
   /**
+   * Get all known preview URLs (port → url).
+   * Used to register previews after the dev server starts.
+   */
+  getPreviewUrls(): Map<number, string>;
+
+  /**
    * Subscribe to preview ready events.
    * Called when a server starts listening on a port.
    */

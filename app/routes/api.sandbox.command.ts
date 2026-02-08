@@ -108,10 +108,17 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
-      return new Response(JSON.stringify({ error: 'Sandbox not running', code: 'SANDBOX_NOT_RUNNING' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          error: 'Sandbox expired',
+          code: 'SANDBOX_EXPIRED',
+          shouldRecreate: true,
+        }),
+        {
+          status: 410,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
     }
 
     logger.info('Executing command in sandbox', {

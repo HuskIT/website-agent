@@ -108,6 +108,7 @@ export class WorkbenchStore {
   #sandboxProvider: SandboxProvider | null = null;
   #fileSyncManager: FileSyncManager | null = null;
   #timeoutManager: TimeoutManager | null = null;
+  #isRecreating = false; // Prevent concurrent sandbox recreations
 
   // Project state for reconnection
   #currentProjectId: string | null = null;
@@ -312,10 +313,11 @@ export class WorkbenchStore {
       this.#fileSyncManager.setProvider(provider);
       this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
-      // Listen for preview ready events
+      // Listen for preview ready events — store URLs but DON'T register yet.
+      // Registration happens in #autoStartDevServer after the dev server launches,
+      // preventing the iframe from loading before there's anything to show.
       provider.onPreviewReady((port, url) => {
-        logger.info('Preview ready', { port, url });
-        this.#previewsStore.registerPreview(port, url, 'vercel');
+        logger.info('Preview URL available (deferred registration)', { port, url });
       });
 
       // Set up timeout management for Vercel
@@ -477,9 +479,9 @@ export class WorkbenchStore {
           this.#fileSyncManager.setProvider(provider);
           this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
-          // Set up previews
+          // Listen for preview URLs — deferred registration (happens after dev server starts)
           provider.onPreviewReady((port, url) => {
-            this.#previewsStore.registerPreview(port, url, 'vercel');
+            logger.info('Preview URL available on reconnect (deferred registration)', { port, url });
           });
 
           // Set up timeout management
@@ -567,8 +569,8 @@ export class WorkbenchStore {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              sandboxId: provider.sandboxId,
-              sandboxProvider: providerType,
+              sandbox_id: provider.sandboxId,
+              sandbox_provider: providerType,
             }),
           });
 
@@ -718,6 +720,162 @@ export class WorkbenchStore {
     }
 
     return this.#timeoutManager.requestExtension(durationMs);
+  }
+
+  /**
+   * Run a sandbox command with automatic retry on 410 (expired) errors.
+   * If the sandbox expired, recreates it and retries the command once.
+   */
+  async #runCommandWithRetry(
+    cmd: string,
+    args: string[],
+    opts?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+    maxRetries = 1,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const provider = this.#sandboxProvider;
+
+    if (!provider) {
+      throw new Error('No sandbox provider available');
+    }
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await provider.runCommand(cmd, args, opts);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        const is410Error =
+          errorMessage.includes('410') ||
+          errorMessage.includes('expired') ||
+          errorMessage.includes('SANDBOX_EXPIRED');
+
+        if (is410Error && attempt < maxRetries) {
+          logger.warn('Sandbox expired during command, recreating', { cmd, attempt, error: errorMessage });
+
+          if (this.#isRecreating) {
+            logger.warn('Sandbox recreation already in progress, waiting...');
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            continue;
+          }
+
+          try {
+            this.#isRecreating = true;
+            await this.#recreateSandbox();
+            logger.info('Sandbox recreated, retrying command', { cmd, attempt });
+            continue;
+          } finally {
+            this.#isRecreating = false;
+          }
+        }
+
+        throw error;
+      }
+    }
+
+    throw new Error('Command failed after retries');
+  }
+
+  /**
+   * Recreate the sandbox after expiration.
+   * Stops the old sandbox, creates a new one, updates the database,
+   * and restores files from snapshot.
+   */
+  async #recreateSandbox(): Promise<void> {
+    const currentProvider = this.#sandboxProvider;
+    const projectId = this.#currentProjectId;
+    const userId = this.#currentUserId;
+    const oldSandboxId = currentProvider?.sandboxId;
+
+    if (!currentProvider || !projectId) {
+      throw new Error('Cannot recreate sandbox: no provider or project ID');
+    }
+
+    logger.info('Recreating sandbox due to expiration', {
+      projectId,
+      oldSandboxId,
+      providerType: this.#currentProviderType,
+    });
+
+    try {
+      // 1. Stop old sandbox
+      this.loadingStatus.set('Stopping expired sandbox...');
+
+      try {
+        await fetch('/api/sandbox/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            sandboxId: oldSandboxId,
+            createSnapshot: false,
+          }),
+        });
+        logger.info('Old sandbox stopped', { oldSandboxId });
+      } catch (stopError) {
+        logger.warn('Failed to stop old sandbox (may already be stopped)', stopError);
+      }
+
+      // 2. Disconnect provider (cleanup local state)
+      await currentProvider.disconnect();
+      this.#sandboxProvider = null;
+      this.#fileSyncManager = null;
+      this.#filesStore.setFileSyncManager(null);
+
+      // Clear previews for old sandbox
+      const previews = this.#previewsStore.previews.get();
+
+      for (const preview of previews) {
+        if (preview.provider === 'vercel') {
+          this.#previewsStore.unregisterPreview(preview.port);
+        }
+      }
+
+      // 3. Create new sandbox
+      this.loadingStatus.set('Creating new sandbox...');
+
+      const newProvider = await this.initializeProvider(
+        this.#currentProviderType,
+        projectId,
+        userId || 'anonymous',
+      );
+
+      logger.info('New sandbox created', {
+        projectId,
+        newSandboxId: newProvider.sandboxId,
+        oldSandboxId,
+      });
+
+      // 4. Update database with new sandbox ID
+      this.loadingStatus.set('Updating database...');
+
+      const updateResponse = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sandbox_id: newProvider.sandboxId,
+          sandbox_provider: newProvider.type,
+        }),
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error(`Failed to update project with new sandbox ID: ${updateResponse.status}`);
+      }
+
+      logger.info('Database updated with new sandbox ID', { projectId, newSandboxId: newProvider.sandboxId });
+
+      // 5. Restore files from database snapshot
+      this.loadingStatus.set('Restoring files...');
+      await this.restoreFromDatabaseSnapshot();
+
+      // 6. Clear loading status on success
+      this.loadingStatus.set(null);
+
+      logger.info('Sandbox recreation complete', { projectId, newSandboxId: newProvider.sandboxId });
+    } catch (error) {
+      logger.error('Sandbox recreation failed', { error, projectId, oldSandboxId });
+      this.loadingStatus.set('Failed to recreate sandbox');
+      throw error;
+    }
   }
 
   /**
@@ -898,7 +1056,7 @@ export class WorkbenchStore {
       }
 
       const snapshot = (await response.json()) as {
-        files: Record<string, { content: string; isBinary: boolean }>;
+        files: Record<string, { content: string; isBinary: boolean; type?: string }>;
         updated_at: string;
       };
 
@@ -955,7 +1113,17 @@ export class WorkbenchStore {
           }
         }
 
-        fileMap[filePath] = { type: 'file', content: fileData.content, isBinary: fileData.isBinary, isLocked: false };
+        /*
+         * Some snapshots store folders as { type: 'folder' } or as { type: 'file', content: '' }
+         * Treat both as folders — don't overwrite a folder entry with a fake file entry
+         */
+        if (fileData.type === 'folder' || (fileData.content === '' && !filePath.includes('.'))) {
+          if (!fileMap[filePath]) {
+            fileMap[filePath] = { type: 'folder' };
+          }
+        } else {
+          fileMap[filePath] = { type: 'file', content: fileData.content, isBinary: fileData.isBinary, isLocked: false };
+        }
       }
 
       this.#filesStore.files.set(fileMap);
@@ -970,14 +1138,49 @@ export class WorkbenchStore {
         hasFileSyncManager: !!this.#fileSyncManager,
       });
 
+      // Check if sandbox has enough time remaining for the upload + install + dev start (~3 min)
+      if (this.#sandboxProvider?.timeoutRemaining !== null && this.#sandboxProvider?.timeoutRemaining !== undefined) {
+        const timeRemaining = this.#sandboxProvider.timeoutRemaining;
+        const MIN_REQUIRED_MS = 3 * 60 * 1000; // 3 minutes
+
+        if (timeRemaining < MIN_REQUIRED_MS) {
+          logger.warn('Sandbox has insufficient time remaining, extending timeout', {
+            timeRemainingMs: timeRemaining,
+            minRequiredMs: MIN_REQUIRED_MS,
+          });
+
+          try {
+            await this.#sandboxProvider.extendTimeout?.(5 * 60 * 1000);
+            logger.info('Sandbox timeout extended');
+          } catch (extendError) {
+            logger.warn('Failed to extend sandbox timeout, proceeding anyway', { error: extendError });
+          }
+        }
+      }
+
       // Write all files to sandbox in chunked batches (Vercel has 4MB limit)
       if (this.#sandboxProvider) {
         // Prepare files in API-ready format (bypass provider to avoid Buffer issues)
         const apiFiles = Object.entries(snapshot.files)
-          .filter(([, fileData]) => {
+          .filter(([filePath, fileData]) => {
             // Skip invalid entries
             if (!fileData || typeof fileData.content !== 'string') {
-              console.warn('[DEBUG] Skipping invalid file entry:', fileData);
+              console.warn('[restoreFromDatabaseSnapshot] Skipping invalid file entry:', fileData);
+              return false;
+            }
+
+            /*
+             * Skip folder entries — some snapshots store folders as { type: 'folder' }
+             * or as { type: 'file', content: '' } for directory paths (no file extension).
+             * Uploading these to Vercel SDK causes 400 errors because the SDK tries
+             * to write a file where a directory already exists.
+             */
+            if (fileData.type === 'folder') {
+              return false;
+            }
+
+            if (fileData.content === '' && !filePath.includes('.')) {
+              logger.info('Skipping directory-like entry with empty content', { filePath });
               return false;
             }
 
@@ -1068,8 +1271,41 @@ export class WorkbenchStore {
             });
 
             if (!response.ok) {
-              const errorData = (await response.json().catch(() => ({}))) as { error?: string };
-              throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+              const errorData = (await response.json().catch(() => ({}))) as {
+                error?: string;
+                code?: string;
+                details?: string;
+                shouldRecreate?: boolean;
+              };
+              console.error('[restoreFromDatabaseSnapshot] Upload error details:', {
+                status: response.status,
+                code: errorData.code,
+                error: errorData.error,
+                details: errorData.details,
+              });
+
+              // If sandbox expired during upload, recreate and restart the entire restore
+              if (response.status === 410 || errorData.code === 'SANDBOX_EXPIRED') {
+                logger.warn('Sandbox expired during file upload, recreating', { chunkIndex: i });
+
+                if (!this.#isRecreating) {
+                  this.#isRecreating = true;
+
+                  try {
+                    await this.#recreateSandbox();
+                  } finally {
+                    this.#isRecreating = false;
+                  }
+                }
+
+                // #recreateSandbox calls restoreFromDatabaseSnapshot internally,
+                // so we return true here — the restore will continue in the recursive call
+                return true;
+              }
+
+              throw new Error(
+                errorData.details || errorData.error || `HTTP ${response.status}: ${response.statusText}`,
+              );
             }
 
             console.log(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
@@ -1102,7 +1338,7 @@ export class WorkbenchStore {
             '[DEBUG restoreFromDatabaseSnapshot] Files in sandbox:',
             uploadedFileCount,
             'Expected:',
-            fileCount,
+            apiFiles.length,
           );
         } catch (findError) {
           console.warn('[DEBUG restoreFromDatabaseSnapshot] find command failed:', findError);
@@ -1201,9 +1437,10 @@ export class WorkbenchStore {
 
     try {
       // Await install so dependencies are available before starting the server
-      console.log('[DEBUG #autoStartDevServer] Calling provider.runCommand for npm install...');
+      // Use retry wrapper to handle sandbox expiration during long-running install
+      console.log('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
 
-      const installResult = await provider.runCommand('npm', ['install', '--no-audit', '--no-fund', '--silent']);
+      const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);
       console.log('[DEBUG #autoStartDevServer] npm install completed:', {
         exitCode: installResult.exitCode,
         stdout: installResult.stdout?.substring(0, 500),
@@ -1245,6 +1482,14 @@ export class WorkbenchStore {
        */
       provider.runCommand('sh', devArgs);
       console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
+
+      // NOW register previews — dev server is starting, so the iframe can begin polling
+      const previewUrls = provider.getPreviewUrls();
+
+      for (const [port, url] of previewUrls) {
+        logger.info('Registering preview after dev server start', { port, url });
+        this.#previewsStore.registerPreview(port, url, 'vercel');
+      }
     } catch (error) {
       const errorDetails = {
         message: error instanceof Error ? error.message : String(error),

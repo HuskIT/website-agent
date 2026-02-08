@@ -96,7 +96,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (sandbox.status === 'stopped' || sandbox.status === 'failed') {
-      return json({ error: 'Sandbox is stopped', code: 'SANDBOX_NOT_RUNNING' }, { status: 404 });
+      return json(
+        { error: 'Sandbox expired', code: 'SANDBOX_EXPIRED', shouldRecreate: true },
+        { status: 410 },
+      );
     }
 
     // Prepare files for writing (SDK expects Array<{ path: string; content: Buffer }>)

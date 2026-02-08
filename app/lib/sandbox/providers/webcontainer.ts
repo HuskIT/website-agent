@@ -345,6 +345,10 @@ export class WebContainerProvider implements SandboxProvider {
     return this._previewUrls.get(port) ?? null;
   }
 
+  getPreviewUrls(): Map<number, string> {
+    return new Map(this._previewUrls);
+  }
+
   /**
    * Subscribe to preview ready events
    */

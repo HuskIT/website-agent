@@ -388,7 +388,12 @@ export class VercelSandboxProvider implements SandboxProvider {
     });
 
     if (!response.ok) {
-      const errorData = (await response.json()) as { error?: string };
+      const errorData = (await response.json()) as { error?: string; code?: string; shouldRecreate?: boolean };
+
+      if (response.status === 410 || errorData.code === 'SANDBOX_EXPIRED') {
+        throw new Error(`SANDBOX_EXPIRED: ${errorData.error || 'Sandbox expired'}`);
+      }
+
       throw new Error(errorData.error || 'Failed to run command');
     }
 
@@ -479,7 +484,12 @@ export class VercelSandboxProvider implements SandboxProvider {
     });
 
     if (!response.ok) {
-      const errorData = (await response.json()) as { error?: string };
+      const errorData = (await response.json()) as { error?: string; code?: string; shouldRecreate?: boolean };
+
+      if (response.status === 410 || errorData.code === 'SANDBOX_EXPIRED') {
+        throw new Error(`SANDBOX_EXPIRED: ${errorData.error || 'Sandbox expired'}`);
+      }
+
       throw new Error(errorData.error || 'Failed to run command');
     }
 
@@ -558,6 +568,10 @@ export class VercelSandboxProvider implements SandboxProvider {
    */
   getPreviewUrl(port: number): string | null {
     return this._previewUrls.get(port) ?? null;
+  }
+
+  getPreviewUrls(): Map<number, string> {
+    return new Map(this._previewUrls);
   }
 
   /**
