@@ -106,6 +106,6 @@ export default class HyperbolicProvider extends BaseProvider {
       apiKey,
     });
 
-    return openai(model);
+    return openai.chat(model);
   }
 }

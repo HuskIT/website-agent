@@ -58,6 +58,6 @@ export default class PerplexityProvider extends BaseProvider {
       apiKey,
     });
 
-    return perplexity(model);
+    return perplexity.chat(model);
   }
 }

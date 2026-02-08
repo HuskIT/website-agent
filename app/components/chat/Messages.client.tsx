@@ -113,6 +113,11 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                   return <Fragment key={index} />;
                 }
 
+                // Skip empty assistant placeholder messages (AI SDK v6 creates these before streaming)
+                if (!isUserMessage && typeof content === 'string' && content.trim().length === 0) {
+                  return <Fragment key={index} />;
+                }
+
                 return (
                   <div key={index} className="w-full">
                     {isUserMessage ? (

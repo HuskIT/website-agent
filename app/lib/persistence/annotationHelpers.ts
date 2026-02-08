@@ -59,14 +59,12 @@ export function normalizeAnnotationsForServer(annotations: JSONValue[] | undefin
 
 /**
  * Extract annotations from an AI SDK Message.
- * Handles both experimental_annotations and annotations fields for compatibility.
  *
  * @param message - AI SDK Message object
  * @returns Annotations array or empty array if none exist
  */
 export function extractMessageAnnotations(message: PersistedMessage): JSONValue[] {
-  // AI SDK supports both `annotations` and `experimental_annotations`
-  const rawAnnotations = (message as any).annotations || (message as any).experimental_annotations || [];
+  const rawAnnotations = (message as any).annotations || [];
 
   return Array.isArray(rawAnnotations) ? rawAnnotations : [];
 }

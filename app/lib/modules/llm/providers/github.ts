@@ -152,6 +152,6 @@ export default class GithubProvider extends BaseProvider {
 
     console.log(`GitHub: Created OpenAI client, requesting model: ${model}`);
 
-    return openai(model);
+    return openai.chat(model);
   }
 }

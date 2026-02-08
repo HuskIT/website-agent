@@ -106,6 +106,6 @@ export default class HuggingFaceProvider extends BaseProvider {
       apiKey,
     });
 
-    return openai(model);
+    return openai.chat(model);
   }
 }

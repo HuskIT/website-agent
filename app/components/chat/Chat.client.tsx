@@ -46,10 +46,49 @@ const logger = createScopedLogger('Chat');
  * text is stored in parts of type 'text'.
  */
 function getMessageText(message: UIMessage): string {
+  if (!message.parts) {
+    return (message as any).content ?? '';
+  }
+
   return message.parts
     .filter((p): p is TextUIPart => p.type === 'text')
     .map((p) => p.text)
     .join('');
+}
+
+/**
+ * Convert a UIMessage (parts-based, AI SDK v6) back to a PersistedMessage (content-based).
+ * Used when passing runtime messages back to the persistence layer.
+ */
+function uiMessageToPersisted(msg: UIMessage): PersistedMessage {
+  const content = msg.parts
+    ? msg.parts
+        .filter((p): p is TextUIPart => p.type === 'text')
+        .map((p) => p.text)
+        .join('')
+    : (msg as any).content ?? '';
+
+  return {
+    id: msg.id,
+    role: msg.role as 'user' | 'assistant' | 'system',
+    content,
+    annotations: (msg as any).annotations,
+    createdAt: (msg as any).createdAt,
+  };
+}
+
+/**
+ * Convert a PersistedMessage (content-based, from DB) to a UIMessage (parts-based, AI SDK v6).
+ * Bridges the persistence layer's content-based format to the runtime parts-based format.
+ */
+function persistedToUIMessage(msg: PersistedMessage): UIMessage {
+  return {
+    id: msg.id,
+    role: msg.role,
+    parts: [{ type: 'text' as const, text: msg.content || '' }],
+    ...(msg.annotations !== undefined && { annotations: msg.annotations }),
+    ...(msg.createdAt !== undefined && { createdAt: msg.createdAt }),
+  } as UIMessage;
 }
 
 /**
@@ -141,16 +180,16 @@ const processSampledMessages = createSampler(
     storeMessageHistory: (messages: PersistedMessage[]) => Promise<void>;
   }) => {
     const { messages, initialMessages, isLoading, parseMessages, storeMessageHistory } = options;
-    parseMessages(messages as unknown as PersistedMessage[], isLoading);
+    parseMessages(messages.map(uiMessageToPersisted), isLoading);
 
     // Only sync messages after streaming completes to avoid syncing empty content
     if (!isLoading && messages.length > initialMessages.length) {
       const unsyncedMessages = messages.filter((message) => {
-        const annotations = extractMessageAnnotations(message as unknown as PersistedMessage);
+        const annotations = extractMessageAnnotations(uiMessageToPersisted(message));
         return !annotations.includes('hidden') && !annotations.includes('no-store');
       });
 
-      storeMessageHistory(unsyncedMessages as unknown as PersistedMessage[]).catch((error) =>
+      storeMessageHistory(unsyncedMessages.map(uiMessageToPersisted)).catch((error) =>
         toast.error(error.message),
       );
     }
@@ -258,7 +297,14 @@ export const ChatImpl = memo(
         api: '/api/chat',
         prepareSendMessagesRequest: ({ messages: reqMessages }) => ({
           body: {
-            messages: reqMessages,
+            messages: reqMessages.filter((msg) => {
+              // Filter out empty assistant placeholder messages (AI SDK v6 creates these)
+              if (msg.role === 'assistant') {
+                return getMessageText(msg).trim().length > 0;
+              }
+
+              return true;
+            }),
             apiKeys,
             files,
             promptId,
@@ -301,7 +347,7 @@ export const ChatImpl = memo(
         // Accumulate data parts into local chatData state
         setChatData((prev) => [...(prev || []), dataPart as unknown as JSONValue]);
       },
-      messages: initialMessages as unknown as UIMessage[],
+      messages: initialMessages.map(persistedToUIMessage),
     });
 
     // Derive isLoading from status for backward compatibility

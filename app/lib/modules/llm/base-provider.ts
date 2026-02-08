@@ -117,5 +117,5 @@ export function getOpenAILikeModel(baseURL: string, apiKey: OptionalApiKey, mode
     apiKey,
   });
 
-  return openai(model);
+  return openai.chat(model);
 }

@@ -222,6 +222,15 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
     maxLLMSteps: number;
   }>();
 
+  // Filter out empty assistant placeholder messages (AI SDK v6 creates these before streaming)
+  const filteredMessages = messages.filter((msg) => {
+    if (msg.role === 'assistant') {
+      return getTextFromUIMessage(msg).trim().length > 0;
+    }
+
+    return true;
+  });
+
   logger.info(`[THEME DEBUG] Received restaurantThemeId: ${restaurantThemeId || 'null'}, chatMode: ${chatMode}`);
 
   const cookieHeader = request.headers.get('Cookie');
@@ -240,7 +249,11 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
     userId: session?.user?.id,
     sessionId: chatId,
     metadata: { chatMode, restaurantThemeId, contextOptimization },
-    input: { userMessage: userMessageContent.slice(0, 2000) },
+    input: {
+      userMessage: userMessageContent.slice(0, 2000),
+      messageCount: messages.length,
+      messageRoles: messages.map((m) => m.role),
+    },
   });
 
   const stream = new SwitchableStream();
@@ -337,7 +350,7 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
         let summary: string | undefined = undefined;
         let messageSliceId = 0;
 
-        const processedMessages = await mcpService.processToolInvocations(messages, writer);
+        const processedMessages = await mcpService.processToolInvocations(filteredMessages, writer);
 
         if (processedMessages.length > 3) {
           messageSliceId = processedMessages.length - 3;
@@ -490,15 +503,9 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
 
         const hasTools = Object.keys(allTools).length > 0;
 
-        // Create Langfuse generation for main streamText
-        const mainGeneration = traceContext
-          ? createGeneration(env, traceContext, {
-              name: 'stream-text-main',
-              model: extractedModel || 'unknown',
-              input: { userMessage: userMessageContent.slice(0, 2000) },
-            })
-          : null;
-        const mainStartTime = performance.now();
+        // mainGeneration and mainStartTime are created later, after messagesToSend is finalized
+        let mainGeneration: ReturnType<typeof createGeneration> = null;
+        let mainStartTime = 0;
 
         const options: StreamingOptions = {
           supabaseConnection: supabase,
@@ -749,6 +756,29 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
         }
 
         const messagesToSend = tokenGuardResult.messages;
+
+        // Create Langfuse generation AFTER messagesToSend is finalized so we log the full messages
+        mainStartTime = performance.now();
+        mainGeneration = traceContext
+          ? createGeneration(env, traceContext, {
+              name: 'stream-text-main',
+              model: extractedModel || 'unknown',
+              input: {
+                messageCount: messagesToSend.length,
+                messages: messagesToSend.map((m, i) => ({
+                  index: i,
+                  role: m.role,
+                  content: typeof m.content === 'string' ? m.content.slice(0, 500) : '[complex]',
+                  partsCount: m.parts?.length ?? 0,
+                })),
+                tokenEstimate: tokenGuardResult.finalTokens,
+                truncated: tokenGuardResult.truncated,
+                contextOptimization,
+                chatMode,
+                summary: summary ? summary.slice(0, 200) : undefined,
+              },
+            })
+          : null;
 
         logger.info(`[THEME DEBUG] Calling streamText (main) with restaurantThemeId: ${restaurantThemeId || 'null'}`);
 

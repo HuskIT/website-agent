@@ -49,6 +49,6 @@ export default class ZAIProvider extends BaseProvider {
       apiKey,
     });
 
-    return openai(model);
+    return openai.chat(model);
   }
 }

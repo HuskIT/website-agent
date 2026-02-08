@@ -100,7 +100,6 @@ export async function selectContext(props: {
       toolCalls: [],
       toolResults: [],
       request: {},
-      experimental_providerMetadata: undefined,
       providerMetadata: undefined,
       roundtrips: [],
       steps: [],

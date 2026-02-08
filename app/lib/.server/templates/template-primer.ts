@@ -236,7 +236,7 @@ function formatBusinessProfileForCustomization(profile: BusinessProfile): string
   const menuLines = crawled?.menu?.categories
     ?.slice(0, 6)
     .map((category) => {
-      const items = category.items
+      const items = (category.items ?? [])
         .slice(0, 6)
         .map((item) => {
           const price = item.price ? ` ($${item.price})` : '';

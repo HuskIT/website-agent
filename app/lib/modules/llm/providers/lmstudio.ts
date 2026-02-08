@@ -89,6 +89,6 @@ export default class LMStudioProvider extends BaseProvider {
       apiKey: '',
     });
 
-    return lmstudio(model);
+    return lmstudio.chat(model);
   };
 }

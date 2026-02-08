@@ -52,15 +52,23 @@ export function isValidMessage(msg: unknown): msg is PersistedMessage {
     return false;
   }
 
-  // Check for required field: content (string or array for multimodal)
-  if (!('content' in msg)) {
+  // Check for required field: content (string or array) or parts (AI SDK v6)
+  if (!('content' in msg) && !('parts' in msg)) {
     return false;
   }
 
   const content = (msg as any).content;
+  const parts = (msg as any).parts;
 
-  // Content can be a string or an array (for multimodal messages)
-  if (typeof content !== 'string' && !Array.isArray(content)) {
+  if (content !== undefined) {
+    if (typeof content !== 'string' && !Array.isArray(content)) {
+      return false;
+    }
+  } else if (parts !== undefined) {
+    if (!Array.isArray(parts)) {
+      return false;
+    }
+  } else {
     return false;
   }
 
@@ -113,6 +121,15 @@ export function isMessageEmpty(msg: PersistedMessage): boolean {
    */
   if (Array.isArray(content)) {
     return (content as unknown[]).length === 0;
+  }
+
+  // AI SDK v6: UIMessage uses parts array instead of content
+  const parts = (msg as any).parts;
+
+  if (Array.isArray(parts)) {
+    return !parts.some(
+      (p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0,
+    );
   }
 
   return true;

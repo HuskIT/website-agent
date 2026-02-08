@@ -19,6 +19,25 @@ export interface IChatMetadata {
 
 const logger = createScopedLogger('ChatHistory');
 
+/**
+ * Extract text content from AI SDK v6 UIMessage parts array.
+ * Falls back to empty string if no text parts are found.
+ */
+function extractTextFromParts(msg: PersistedMessage): string {
+  const parts = (msg as any).parts;
+
+  if (Array.isArray(parts)) {
+    return (
+      parts
+        .filter((p: any) => p.type === 'text')
+        .map((p: any) => p.text)
+        .join('') || ''
+    );
+  }
+
+  return '';
+}
+
 // this is used at the top level and never rejects
 export async function openDatabase(): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === 'undefined') {
@@ -463,7 +482,7 @@ export async function setServerMessages(projectId: string, messages: PersistedMe
       message_id: msg.id,
       sequence_num: index,
       role: msg.role,
-      content: msg.content,
+      content: msg.content ?? extractTextFromParts(msg),
 
       // Extract and normalize annotations (filtering out local-only markers like pending-sync)
       annotations: normalizeAnnotationsForServer(extractMessageAnnotations(msg)),
@@ -514,7 +533,7 @@ export async function appendServerMessages(
     const apiMessages = messages.map((msg) => ({
       message_id: msg.id,
       role: msg.role,
-      content: msg.content,
+      content: msg.content ?? extractTextFromParts(msg),
       annotations: normalizeAnnotationsForServer(extractMessageAnnotations(msg)),
       created_at: (msg.createdAt as Date)?.toISOString() || new Date().toISOString(),
     }));
