@@ -99,6 +99,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const [showDeviceFrameInPreview, setShowDeviceFrameInPreview] = useState(false);
   const expoUrl = useStore(expoUrlAtom);
   const [isExpoQrModalOpen, setIsExpoQrModalOpen] = useState(false);
+  const refreshSignal = useStore(workbenchStore.vercelPreviewRefreshSignal);
 
   useEffect(() => {
     if (!activePreview) {
@@ -503,6 +504,32 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
       setCurrentWidth(Math.round((containerWidth * widthPercent) / 100));
     }
   }, [isDeviceModeOn]);
+
+  /*
+   * Watch for file sync success signal from FileSyncManager.
+   * When files are successfully synced to Vercel sandbox, trigger a debounced
+   * iframe reload so the preview reflects the new content.
+   * Vite HMR doesn't work through credentialless iframes, so we manually reload.
+   */
+  useEffect(() => {
+    if (!isVercelPreview || !serverReady || !iframeRef.current || refreshSignal === 0) {
+      return;
+    }
+
+    // Debounce: wait 1 second after last sync event before reloading
+    const timer = setTimeout(() => {
+      console.log('[Preview] Reloading iframe after Vercel file sync');
+
+      if (iframeRef.current) {
+        iframeRef.current.src = iframeRef.current.src;
+      }
+    }, 1000);
+
+    // eslint-disable-next-line consistent-return
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [refreshSignal, isVercelPreview, serverReady]);
 
   const GripIcon = () => (
     <div

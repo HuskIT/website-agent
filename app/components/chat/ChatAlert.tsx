@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ActionAlert } from '~/types/actions';
 import { classNames } from '~/utils/classNames';
+import { workbenchStore } from '~/lib/stores/workbench';
 
 interface Props {
   alert: ActionAlert;
@@ -9,13 +10,21 @@ interface Props {
 }
 
 export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
-  const { description, content, source } = alert;
+  const { type, title: alertTitle, description, content, source } = alert;
 
+  const isWarning = type === 'warning';
   const isPreview = source === 'preview';
-  const title = isPreview ? 'Preview Error' : 'Terminal Error';
-  const message = isPreview
-    ? 'We encountered an error while running the preview. Would you like Bolt to analyze and help resolve this issue?'
-    : 'We encountered an error while running terminal commands. Would you like Bolt to analyze and help resolve this issue?';
+
+  /*
+   * Warning alerts (e.g. Session Expired) use the alert's own title/description
+   * Error alerts use the hardcoded source-based titles (existing behavior)
+   */
+  const title = isWarning ? alertTitle || 'Warning' : isPreview ? 'Preview Error' : 'Terminal Error';
+  const message = isWarning
+    ? description
+    : isPreview
+      ? 'We encountered an error while running the preview. Would you like Bolt to analyze and help resolve this issue?'
+      : 'We encountered an error while running terminal commands. Would you like Bolt to analyze and help resolve this issue?';
 
   return (
     <AnimatePresence>
@@ -34,7 +43,9 @@ export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
             animate={{ scale: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <div className={`i-ph:warning-duotone text-xl text-bolt-elements-button-danger-text`}></div>
+            <div
+              className={`i-ph:warning-duotone text-xl ${isWarning ? 'text-bolt-elements-button-warning-text' : 'text-bolt-elements-button-danger-text'}`}
+            ></div>
           </motion.div>
           {/* Content */}
           <div className="ml-3 flex-1">
@@ -53,7 +64,7 @@ export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
               className={`mt-2 text-sm text-bolt-elements-textSecondary`}
             >
               <p>{message}</p>
-              {description && (
+              {description && !isWarning && (
                 <div className="text-xs text-bolt-elements-textSecondary p-2 bg-bolt-elements-background-depth-3 rounded mt-4 mb-4">
                   Error: {description}
                 </div>
@@ -68,36 +79,72 @@ export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
               transition={{ delay: 0.3 }}
             >
               <div className={classNames(' flex gap-2')}>
-                <button
-                  onClick={() =>
-                    postMessage(
-                      `*Fix this ${isPreview ? 'preview' : 'terminal'} error* \n\`\`\`${isPreview ? 'js' : 'sh'}\n${content}\n\`\`\`\n`,
-                    )
-                  }
-                  className={classNames(
-                    `px-2 py-1.5 rounded-md text-sm font-medium`,
-                    'bg-bolt-elements-button-primary-background',
-                    'hover:bg-bolt-elements-button-primary-backgroundHover',
-                    'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-danger-background',
-                    'text-bolt-elements-button-primary-text',
-                    'flex items-center gap-1.5',
-                  )}
-                >
-                  <div className="i-ph:chat-circle-duotone"></div>
-                  Ask HuskIT
-                </button>
-                <button
-                  onClick={clearAlert}
-                  className={classNames(
-                    `px-2 py-1.5 rounded-md text-sm font-medium`,
-                    'bg-bolt-elements-button-secondary-background',
-                    'hover:bg-bolt-elements-button-secondary-backgroundHover',
-                    'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-secondary-background',
-                    'text-bolt-elements-button-secondary-text',
-                  )}
-                >
-                  Dismiss
-                </button>
+                {isWarning ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        workbenchStore.recreateSandbox();
+                        clearAlert();
+                      }}
+                      className={classNames(
+                        `px-2 py-1.5 rounded-md text-sm font-medium`,
+                        'bg-bolt-elements-button-primary-background',
+                        'hover:bg-bolt-elements-button-primary-backgroundHover',
+                        'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-primary-background',
+                        'text-bolt-elements-button-primary-text',
+                        'flex items-center gap-1.5',
+                      )}
+                    >
+                      <div className="i-ph:arrows-clockwise-duotone"></div>
+                      Restart Session
+                    </button>
+                    <button
+                      onClick={clearAlert}
+                      className={classNames(
+                        `px-2 py-1.5 rounded-md text-sm font-medium`,
+                        'bg-bolt-elements-button-secondary-background',
+                        'hover:bg-bolt-elements-button-secondary-backgroundHover',
+                        'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-secondary-background',
+                        'text-bolt-elements-button-secondary-text',
+                      )}
+                    >
+                      Dismiss
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() =>
+                        postMessage(
+                          `*Fix this ${isPreview ? 'preview' : 'terminal'} error* \n\`\`\`${isPreview ? 'js' : 'sh'}\n${content}\n\`\`\`\n`,
+                        )
+                      }
+                      className={classNames(
+                        `px-2 py-1.5 rounded-md text-sm font-medium`,
+                        'bg-bolt-elements-button-primary-background',
+                        'hover:bg-bolt-elements-button-primary-backgroundHover',
+                        'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-danger-background',
+                        'text-bolt-elements-button-primary-text',
+                        'flex items-center gap-1.5',
+                      )}
+                    >
+                      <div className="i-ph:chat-circle-duotone"></div>
+                      Ask HuskIT
+                    </button>
+                    <button
+                      onClick={clearAlert}
+                      className={classNames(
+                        `px-2 py-1.5 rounded-md text-sm font-medium`,
+                        'bg-bolt-elements-button-secondary-background',
+                        'hover:bg-bolt-elements-button-secondary-backgroundHover',
+                        'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bolt-elements-button-secondary-background',
+                        'text-bolt-elements-button-secondary-text',
+                      )}
+                    >
+                      Dismiss
+                    </button>
+                  </>
+                )}
               </div>
             </motion.div>
           </div>

@@ -710,9 +710,6 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: any
             streamRecovery.updateActivity();
 
             // Log streaming text chunks
-            if (part.type === 'text-delta') {
-              console.log('[LLM STREAM]:', part.textDelta);
-            }
 
             if (part.type === 'error') {
               const error: any = part.error;

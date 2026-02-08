@@ -26,9 +26,15 @@ export interface FileSyncConfig {
 
   /** Delay between retries (ms) */
   retryDelayMs?: number;
+
+  /** Called when all retries fail for a batch of files */
+  onSyncFailure?: (paths: string[], error: string) => void;
+
+  /** Called when files are successfully synced */
+  onSyncSuccess?: (paths: string[]) => void;
 }
 
-const DEFAULT_CONFIG: Required<FileSyncConfig> = {
+const DEFAULT_CONFIG: Required<Omit<FileSyncConfig, 'onSyncFailure' | 'onSyncSuccess'>> = {
   debounceMs: 100,
   maxBatchSize: 50,
   maxRetries: 3,
@@ -42,7 +48,7 @@ const DEFAULT_CONFIG: Required<FileSyncConfig> = {
 export class FileSyncManager {
   private _instanceId = Math.random().toString(36).substring(7);
   private _provider: SandboxProvider | null = null;
-  private _config: Required<FileSyncConfig>;
+  private _config: Required<Omit<FileSyncConfig, 'onSyncFailure' | 'onSyncSuccess'>>;
   private _state: FileSyncState = {
     pendingWrites: [],
     syncing: [],
@@ -52,9 +58,13 @@ export class FileSyncManager {
   private _stateCallbacks: Set<SyncStateCallback> = new Set();
   private _debounceTimer: NodeJS.Timeout | null = null;
   private _isDisposed = false;
+  private _onSyncFailure?: (paths: string[], error: string) => void;
+  private _onSyncSuccess?: (paths: string[]) => void;
 
   constructor(config?: FileSyncConfig) {
     this._config = { ...DEFAULT_CONFIG, ...config };
+    this._onSyncFailure = config?.onSyncFailure;
+    this._onSyncSuccess = config?.onSyncSuccess;
   }
 
   /**
@@ -251,6 +261,9 @@ export class FileSyncManager {
           this._state.syncedAt[file.path] = now;
         }
 
+        // Signal success to parent (for preview refresh)
+        this._onSyncSuccess?.(batch);
+
         // Remove from syncing
         this._state.syncing = this._state.syncing.filter((p) => !batch.includes(p));
         this._notifyStateChange();
@@ -278,6 +291,9 @@ export class FileSyncManager {
     for (const path of batch) {
       this._state.errors[path] = lastError?.message || 'Sync failed';
     }
+
+    // Signal failure to parent (workbench) for possible recovery
+    this._onSyncFailure?.(batch, lastError?.message || 'Sync failed');
 
     // Remove from syncing
     this._state.syncing = this._state.syncing.filter((p) => !batch.includes(p));

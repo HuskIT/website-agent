@@ -140,6 +140,13 @@ export class WorkbenchStore {
    */
   loadingStatus: WritableAtom<string | null> = import.meta.hot?.data.loadingStatus ?? atom<string | null>(null);
 
+  /**
+   * Signal for Preview.tsx to reload iframe after successful file sync to Vercel sandbox.
+   * Set to Date.now() when files are synced; Preview.tsx watches and debounces the reload.
+   */
+  vercelPreviewRefreshSignal: WritableAtom<number> =
+    import.meta.hot?.data.vercelPreviewRefreshSignal ?? atom<number>(0);
+
   modifiedFiles = new Set<string>();
   artifactIdList: string[] = [];
   #globalExecutionQueue = Promise.resolve();
@@ -152,6 +159,7 @@ export class WorkbenchStore {
       import.meta.hot.data.actionAlert = this.actionAlert;
       import.meta.hot.data.supabaseAlert = this.supabaseAlert;
       import.meta.hot.data.deployAlert = this.deployAlert;
+      import.meta.hot.data.vercelPreviewRefreshSignal = this.vercelPreviewRefreshSignal;
 
       // Ensure binary files are properly preserved across hot reloads
       const filesMap = this.files.get();
@@ -310,7 +318,59 @@ export class WorkbenchStore {
 
     // Set up FileSyncManager for cloud providers
     if (providerType === 'vercel') {
-      this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 300 });
+      this.#fileSyncManager = new FileSyncManager({
+        maxBatchSize: 50,
+        debounceMs: 300,
+        onSyncSuccess: (_paths) => {
+          // Signal Preview.tsx to reload iframe after files synced
+          this.vercelPreviewRefreshSignal.set(Date.now());
+        },
+        onSyncFailure: (paths, error) => {
+          const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
+
+          if (!is410) {
+            logger.warn('File sync failed (non-sandbox error)', { paths, error });
+            return;
+          }
+
+          // Sandbox is dead — trigger recreation if user is active
+          if (this.#isRecreating) {
+            return;
+          }
+
+          if (!this.#isUserActive()) {
+            logger.info('File sync: sandbox dead but user idle — showing banner');
+            this.actionAlert.set({
+              type: 'warning',
+              title: 'Session Expired',
+              description: 'Your sandbox session expired. Click Restart to continue.',
+              content: '',
+            });
+
+            return;
+          }
+
+          this.#recreationCount++;
+
+          if (this.#recreationCount > 2) {
+            this.actionAlert.set({
+              type: 'warning',
+              title: 'Session Expired',
+              description: 'Your sandbox has expired multiple times. Click Restart to continue.',
+              content: '',
+            });
+            return;
+          }
+
+          logger.warn('File sync detected dead sandbox, triggering recreation', { paths });
+          this.#isRecreating = true;
+          this.#recreateSandbox()
+            .catch((e) => logger.error('Failed to recreate after sync failure', e))
+            .finally(() => {
+              this.#isRecreating = false;
+            });
+        },
+      });
       this.#fileSyncManager.setProvider(provider);
       this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
@@ -488,7 +548,59 @@ export class WorkbenchStore {
           this.#startUserActivityTracking();
 
           // Set up FileSyncManager
-          this.#fileSyncManager = new FileSyncManager({ maxBatchSize: 50, debounceMs: 300 });
+          this.#fileSyncManager = new FileSyncManager({
+            maxBatchSize: 50,
+            debounceMs: 300,
+            onSyncSuccess: (_paths) => {
+              // Signal Preview.tsx to reload iframe after files synced
+              this.vercelPreviewRefreshSignal.set(Date.now());
+            },
+            onSyncFailure: (paths, error) => {
+              const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
+
+              if (!is410) {
+                logger.warn('File sync failed (non-sandbox error)', { paths, error });
+                return;
+              }
+
+              // Sandbox is dead — trigger recreation if user is active
+              if (this.#isRecreating) {
+                return;
+              }
+
+              if (!this.#isUserActive()) {
+                logger.info('File sync: sandbox dead but user idle — showing banner');
+                this.actionAlert.set({
+                  type: 'warning',
+                  title: 'Session Expired',
+                  description: 'Your sandbox session expired. Click Restart to continue.',
+                  content: '',
+                });
+
+                return;
+              }
+
+              this.#recreationCount++;
+
+              if (this.#recreationCount > 2) {
+                this.actionAlert.set({
+                  type: 'warning',
+                  title: 'Session Expired',
+                  description: 'Your sandbox has expired multiple times. Click Restart to continue.',
+                  content: '',
+                });
+                return;
+              }
+
+              logger.warn('File sync detected dead sandbox, triggering recreation', { paths });
+              this.#isRecreating = true;
+              this.#recreateSandbox()
+                .catch((e) => logger.error('Failed to recreate after sync failure', e))
+                .finally(() => {
+                  this.#isRecreating = false;
+                });
+            },
+          });
           this.#fileSyncManager.setProvider(provider);
           this.#filesStore.setFileSyncManager(this.#fileSyncManager);
 
