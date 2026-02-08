@@ -5,7 +5,8 @@
  * Part of specs/001-project-chat-sync implementation (Phase 2).
  */
 
-import type { Message, JSONValue } from 'ai';
+import type { JSONValue } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import { PENDING_SYNC_ANNOTATION, SYNC_ERROR_ANNOTATION } from './chatSyncConstants';
 
 /**
@@ -58,14 +59,12 @@ export function normalizeAnnotationsForServer(annotations: JSONValue[] | undefin
 
 /**
  * Extract annotations from an AI SDK Message.
- * Handles both experimental_annotations and annotations fields for compatibility.
  *
  * @param message - AI SDK Message object
  * @returns Annotations array or empty array if none exist
  */
-export function extractMessageAnnotations(message: Message): JSONValue[] {
-  // AI SDK supports both `annotations` and `experimental_annotations`
-  const rawAnnotations = (message as any).annotations || (message as any).experimental_annotations || [];
+export function extractMessageAnnotations(message: PersistedMessage): JSONValue[] {
+  const rawAnnotations = (message as any).annotations || [];
 
   return Array.isArray(rawAnnotations) ? rawAnnotations : [];
 }
@@ -77,7 +76,7 @@ export function extractMessageAnnotations(message: Message): JSONValue[] {
  * @param message - AI SDK Message object
  * @returns true if message has pending-sync annotation
  */
-export function isMessagePendingSync(message: Message): boolean {
+export function isMessagePendingSync(message: PersistedMessage): boolean {
   const annotations = extractMessageAnnotations(message);
   return annotations.some(
     (ann) => ann && typeof ann === 'object' && 'type' in ann && ann.type === PENDING_SYNC_ANNOTATION,
@@ -92,7 +91,7 @@ export function isMessagePendingSync(message: Message): boolean {
  * @param errorMessage - Optional error message if this is a retry after failure
  * @returns Modified message with pending-sync annotation
  */
-export function addPendingSyncAnnotation(message: Message, errorMessage?: string): Message {
+export function addPendingSyncAnnotation(message: PersistedMessage, errorMessage?: string): PersistedMessage {
   const existingAnnotations = extractMessageAnnotations(message);
 
   // Remove any existing pending-sync or sync-error annotations
@@ -124,7 +123,7 @@ export function addPendingSyncAnnotation(message: Message, errorMessage?: string
  * @param message - AI SDK Message object
  * @returns Modified message without pending-sync annotation
  */
-export function clearPendingSyncAnnotation(message: Message): Message {
+export function clearPendingSyncAnnotation(message: PersistedMessage): PersistedMessage {
   const existingAnnotations = extractMessageAnnotations(message);
 
   const clearedAnnotations = existingAnnotations.filter(

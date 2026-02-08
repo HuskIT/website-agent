@@ -1,10 +1,23 @@
-import { type Message } from 'ai';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, PROVIDER_REGEX, PROVIDER_LIST } from '~/utils/constants';
 import { IGNORE_PATTERNS, type FileMap } from './constants';
 import ignore from 'ignore';
 import type { ContextAnnotation } from '~/types/context';
 
-export function extractPropertiesFromMessage(message: Omit<Message, 'id'>): {
+/**
+ * Legacy message shape used internally by context/summary utilities.
+ * In AI SDK v6 the old `Message` type was removed; this captures
+ * the subset of properties the codebase actually relies on.
+ */
+export interface LegacyMessage {
+  id?: string;
+  role: 'system' | 'user' | 'assistant';
+  content: any;
+  annotations?: any[];
+  parts?: any[];
+  [key: string]: any;
+}
+
+export function extractPropertiesFromMessage(message: Omit<LegacyMessage, 'id'>): {
   model: string;
   provider: string;
   content: string;
@@ -89,7 +102,7 @@ export function createFilesContext(files: FileMap, useRelativePath?: boolean) {
   return `<boltArtifact id="code-content" title="Code Content" >\n${fileContexts.join('\n')}\n</boltArtifact>`;
 }
 
-export function extractCurrentContext(messages: Message[]) {
+export function extractCurrentContext(messages: LegacyMessage[]) {
   const lastAssistantMessage = messages.filter((x) => x.role == 'assistant').slice(-1)[0];
 
   if (!lastAssistantMessage) {

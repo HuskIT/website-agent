@@ -5,7 +5,7 @@ import { createScopedLogger } from '~/utils/logger';
 import { rehypePlugins, remarkPlugins, allowedHTMLElements } from '~/utils/markdown';
 import { Artifact, openArtifactInWorkbench } from './Artifact';
 import { CodeBlock } from './CodeBlock';
-import type { Message } from 'ai';
+import type { UIMessage } from 'ai';
 import styles from './Markdown.module.scss';
 import ThoughtBox from './ThoughtBox';
 import type { ProviderInfo } from '~/types/model';
@@ -16,7 +16,7 @@ interface MarkdownProps {
   children: string;
   html?: boolean;
   limitedMarkdown?: boolean;
-  append?: (message: Message) => void;
+  append?: (message: UIMessage) => void;
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   model?: string;
@@ -151,12 +151,12 @@ export const Markdown = memo(
                   } else if (type === 'message' && append) {
                     append({
                       id: `quick-action-message-${Date.now()}`,
-                      content: [
+                      parts: [
                         {
-                          type: 'text',
+                          type: 'text' as const,
                           text: `[Model: ${model}]\n\n[Provider: ${provider?.name}]\n\n${message}`,
                         },
-                      ] as any,
+                      ],
                       role: 'user',
                     });
                     console.log('Message appended:', message);
@@ -164,12 +164,12 @@ export const Markdown = memo(
                     setChatMode('build');
                     append({
                       id: `quick-action-implement-${Date.now()}`,
-                      content: [
+                      parts: [
                         {
-                          type: 'text',
+                          type: 'text' as const,
                           text: `[Model: ${model}]\n\n[Provider: ${provider?.name}]\n\n${message}`,
                         },
-                      ] as any,
+                      ],
                       role: 'user',
                     });
                   } else if (type === 'link' && typeof href === 'string') {

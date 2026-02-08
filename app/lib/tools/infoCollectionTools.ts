@@ -79,7 +79,7 @@ export function createInfoCollectionTools(context: ToolContext) {
     startInfoCollection: tool({
       description:
         'Start a new website information collection session or resume an existing one. Call this when user wants to generate/create a website.',
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: async () => {
         logger.debug('startInfoCollection called', { userId: context.userId });
 
@@ -113,7 +113,7 @@ export function createInfoCollectionTools(context: ToolContext) {
     collectWebsiteUrl: tool({
       description:
         'Record whether user has an existing website and collect the URL if they do. Call after asking about existing website.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID from startInfoCollection'),
         hasWebsite: z.boolean().describe('Whether the user has an existing website'),
         url: z.string().optional().describe('The website URL if user has one'),
@@ -166,7 +166,7 @@ export function createInfoCollectionTools(context: ToolContext) {
      */
     collectGoogleMapsUrl: tool({
       description: 'Record whether user has a Google Maps business listing and collect the URL if they do.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID'),
         hasListing: z.boolean().describe('Whether user has a Google Maps business listing'),
         url: z.string().optional().describe('The Google Maps URL if user has one'),
@@ -217,7 +217,7 @@ export function createInfoCollectionTools(context: ToolContext) {
      */
     collectDescription: tool({
       description: 'Record the user description of their desired website. Any non-empty description is accepted.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID'),
         description: z.string().min(1).describe('User description of desired website'),
       }),
@@ -247,7 +247,7 @@ export function createInfoCollectionTools(context: ToolContext) {
      */
     updateCollectedInfo: tool({
       description: 'Update a previously collected field when user wants to make a correction.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID'),
         field: z.enum(['websiteUrl', 'googleMapsUrl', 'websiteDescription']),
         newValue: z.string().describe('The corrected value'),
@@ -294,7 +294,7 @@ export function createInfoCollectionTools(context: ToolContext) {
     finalizeCollection: tool({
       description:
         'Complete the information collection after user confirms all data is correct. This triggers the website generation pipeline immediately.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID'),
         confirmed: z.boolean().describe('Whether user confirmed the collected information'),
       }),
@@ -409,7 +409,7 @@ export function createInfoCollectionTools(context: ToolContext) {
      */
     deleteSession: tool({
       description: 'Delete an information collection session when user requests it.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID to delete'),
       }),
       execute: async ({ sessionId }) => {
@@ -429,7 +429,7 @@ export function createInfoCollectionTools(context: ToolContext) {
      */
     getSessionState: tool({
       description: 'Get the current state of the info collection session.',
-      parameters: z.object({
+      inputSchema: z.object({
         sessionId: z.string().describe('The session ID'),
       }),
       execute: async ({ sessionId }) => {

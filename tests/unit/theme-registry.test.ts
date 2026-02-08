@@ -3,6 +3,10 @@
  *
  * Tests the theme registry utility functions to ensure proper
  * theme lookup, prompt retrieval, and data consistency.
+ *
+ * NOTE: Only 'indochineluxe' theme is currently active in the registry.
+ * Other themes are commented out until their zip files are added.
+ * Update these tests when more themes are enabled.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,20 +21,20 @@ import {
 
 describe('Restaurant Theme Registry', () => {
   describe('RESTAURANT_THEMES', () => {
-    it('should contain exactly 12 themes', () => {
-      expect(RESTAURANT_THEMES).toHaveLength(12);
+    it('should contain active themes', () => {
+      expect(RESTAURANT_THEMES.length).toBeGreaterThan(0);
     });
 
     it('should have unique theme IDs', () => {
       const ids = RESTAURANT_THEMES.map(theme => theme.id);
       const uniqueIds = new Set(ids);
-      expect(uniqueIds.size).toBe(12);
+      expect(uniqueIds.size).toBe(RESTAURANT_THEMES.length);
     });
 
     it('should have unique template names', () => {
       const templateNames = RESTAURANT_THEMES.map(theme => theme.templateName);
       const uniqueTemplateNames = new Set(templateNames);
-      expect(uniqueTemplateNames.size).toBe(12);
+      expect(uniqueTemplateNames.size).toBe(RESTAURANT_THEMES.length);
     });
 
     it('should have valid theme IDs', () => {
@@ -78,15 +82,20 @@ describe('Restaurant Theme Registry', () => {
         expect(theme.styleTags.length).toBeGreaterThan(0);
       });
     });
+
+    it('should include indochineluxe theme', () => {
+      const ids = RESTAURANT_THEMES.map(theme => theme.id);
+      expect(ids).toContain('indochineluxe');
+    });
   });
 
   describe('getThemeById', () => {
-    it('should return correct theme for valid ID', () => {
-      const theme = getThemeById('bamboobistro');
+    it('should return correct theme for active ID', () => {
+      const theme = getThemeById('indochineluxe');
       expect(theme).toBeDefined();
-      expect(theme?.id).toBe('bamboobistro');
-      expect(theme?.label).toBe('The Bamboo Bistro');
-      expect(theme?.templateName).toBe('Bamboo Bistro');
+      expect(theme?.id).toBe('indochineluxe');
+      expect(theme?.label).toBe('Indochine Luxe');
+      expect(theme?.templateName).toBe('Indochine Luxe');
     });
 
     it('should return undefined for invalid ID', () => {
@@ -95,10 +104,9 @@ describe('Restaurant Theme Registry', () => {
     });
 
     it('should return theme with all expected properties', () => {
-      const theme = getThemeById('noirluxev3');
+      const theme = getThemeById('indochineluxe');
       expect(theme).toBeDefined();
-      expect(theme?.id).toBe('noirluxev3');
-      expect(theme?.label).toBe('Noir Luxe v3');
+      expect(theme?.id).toBe('indochineluxe');
       expect(typeof theme?.description).toBe('string');
       expect(Array.isArray(theme?.cuisines)).toBe(true);
       expect(Array.isArray(theme?.styleTags)).toBe(true);
@@ -109,10 +117,10 @@ describe('Restaurant Theme Registry', () => {
 
   describe('getThemeByTemplateName', () => {
     it('should return correct theme for valid template name', () => {
-      const theme = getThemeByTemplateName('Bamboo Bistro');
+      const theme = getThemeByTemplateName('Indochine Luxe');
       expect(theme).toBeDefined();
-      expect(theme?.id).toBe('bamboobistro');
-      expect(theme?.templateName).toBe('Bamboo Bistro');
+      expect(theme?.id).toBe('indochineluxe');
+      expect(theme?.templateName).toBe('Indochine Luxe');
     });
 
     it('should return undefined for invalid template name', () => {
@@ -121,43 +129,27 @@ describe('Restaurant Theme Registry', () => {
     });
 
     it('should be case-sensitive', () => {
-      const theme1 = getThemeByTemplateName('Bamboo Bistro');
-      const theme2 = getThemeByTemplateName('bamboo bistro');
+      const theme1 = getThemeByTemplateName('Indochine Luxe');
+      const theme2 = getThemeByTemplateName('indochine luxe');
       expect(theme1).toBeDefined();
       expect(theme2).toBeUndefined();
     });
 
-    it('should match exactly with template names in constants', () => {
-      const templateNames = [
-        'Artisan Hearth v3',
-        'Bamboo Bistro',
-        'Bold Feast v2',
-        'Chromatic Street',
-        'Classic Minimalist v2',
-        'Dynamic Fusion',
-        'Fresh Market',
-        'Gastrobotanical',
-        'Indochine Luxe',
-        'Noir Luxe v3',
-        'Saigon Veranda',
-        'The Red Noodle',
-      ];
-
-      templateNames.forEach(templateName => {
-        const theme = getThemeByTemplateName(templateName);
-        expect(theme).toBeDefined();
-        expect(theme?.templateName).toBe(templateName);
+    it('should match with active template names', () => {
+      RESTAURANT_THEMES.forEach(theme => {
+        const found = getThemeByTemplateName(theme.templateName);
+        expect(found).toBeDefined();
+        expect(found?.templateName).toBe(theme.templateName);
       });
     });
   });
 
   describe('getThemePrompt', () => {
     it('should return prompt content for valid theme ID', () => {
-      const prompt = getThemePrompt('bamboobistro');
+      const prompt = getThemePrompt('indochineluxe');
       expect(prompt).toBeDefined();
       expect(typeof prompt).toBe('string');
       expect(prompt!.length).toBeGreaterThan(0);
-      expect(prompt).toContain('Bamboo'); // Theme-specific content (case-sensitive)
     });
 
     it('should return null for invalid theme ID', () => {
@@ -165,25 +157,19 @@ describe('Restaurant Theme Registry', () => {
       expect(prompt).toBeNull();
     });
 
-    it('should return different prompts for different themes', () => {
-      const prompt1 = getThemePrompt('bamboobistro');
-      const prompt2 = getThemePrompt('noirluxev3');
-      expect(prompt1).not.toBe(prompt2);
-    });
-
     it('should return prompts with markdown formatting', () => {
-      const prompt = getThemePrompt('freshmarket');
+      const prompt = getThemePrompt('indochineluxe');
       expect(prompt).toBeDefined();
       expect(typeof prompt).toBe('string');
-      // Most theme prompts should have markdown headers
+      // Theme prompts should have markdown headers
       expect(prompt).toMatch(/#+\s*\w+/);
     });
   });
 
   describe('getThemeList', () => {
-    it('should return array with 12 themes', () => {
+    it('should return array with active themes', () => {
       const themeList = getThemeList();
-      expect(themeList).toHaveLength(12);
+      expect(themeList.length).toBe(RESTAURANT_THEMES.length);
     });
 
     it('should return array with expected structure', () => {
@@ -210,59 +196,28 @@ describe('Restaurant Theme Registry', () => {
       });
     });
 
-    it('should include all theme IDs', () => {
+    it('should include indochineluxe', () => {
       const themeList = getThemeList();
       const themeIds = themeList.map(theme => theme.id);
-      const expectedIds: RestaurantThemeId[] = [
-        'artisanhearthv3',
-        'bamboobistro',
-        'boldfeastv2',
-        'chromaticstreet',
-        'classicminimalistv2',
-        'dynamicfusion',
-        'freshmarket',
-        'gastrobotanical',
-        'indochineluxe',
-        'noirluxev3',
-        'saigonveranda',
-        'therednoodle',
-      ];
-
-      expectedIds.forEach(expectedId => {
-        expect(themeIds).toContain(expectedId);
-      });
+      expect(themeIds).toContain('indochineluxe');
     });
   });
 
   describe('Integration Tests', () => {
     it('should maintain consistency between lookup methods', () => {
-      const themeById = getThemeById('bamboobistro');
-      const themeByTemplate = getThemeByTemplateName('Bamboo Bistro');
+      const themeById = getThemeById('indochineluxe');
+      const themeByTemplate = getThemeByTemplateName('Indochine Luxe');
 
       expect(themeById).toBeDefined();
       expect(themeByTemplate).toBeDefined();
       expect(themeById).toEqual(themeByTemplate);
     });
 
-    it('should have matching IDs between registry and constants', () => {
-      // This tests the integration between registry and constants
-      const registryThemeIds = RESTAURANT_THEMES.map(theme => theme.id);
-      const expectedIds: RestaurantThemeId[] = [
-        'artisanhearthv3',
-        'bamboobistro',
-        'boldfeastv2',
-        'chromaticstreet',
-        'classicminimalistv2',
-        'dynamicfusion',
-        'freshmarket',
-        'gastrobotanical',
-        'indochineluxe',
-        'noirluxev3',
-        'saigonveranda',
-        'therednoodle',
-      ];
+    it('should have matching IDs between registry and list', () => {
+      const registryThemeIds = RESTAURANT_THEMES.map(theme => theme.id).sort();
+      const listThemeIds = getThemeList().map(theme => theme.id).sort();
 
-      expect(registryThemeIds.sort()).toEqual(expectedIds.sort());
+      expect(registryThemeIds).toEqual(listThemeIds);
     });
   });
 });

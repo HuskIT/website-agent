@@ -401,6 +401,7 @@ All PRs must pass:
 - Drizzle ORM 0.44.7 + PostgreSQL (postgres 3.4.7) for database access
 - Supabase for hosted PostgreSQL and migrations
 - Langfuse for LLM observability and tracing (feature-flagged)
+- Supabase/PostgreSQL (messages persist unchanged at DB layer) (001-ai-sdk-v6-migration)
 
 ## Recent Changes
 - **Langfuse + enhanced markdown crawler (PR #30)**: Langfuse LLM observability integration with feature flag, new `generateGoogleMapsMarkdown()` and `crawlWebsiteMarkdown()` crawler endpoints, parallel markdown fetching with `Promise.allSettled`, extended `BusinessProfile` type with markdown fields, theme prompt updates for strict markdown output format

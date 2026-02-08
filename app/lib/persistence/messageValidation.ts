@@ -5,7 +5,7 @@
  * From specs/001-load-project-messages/data-model.md
  */
 
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 
 /**
  * Valid message roles according to AI SDK.
@@ -32,7 +32,7 @@ export const VALID_ROLES = ['user', 'assistant', 'system'] as const;
  * }
  * ```
  */
-export function isValidMessage(msg: unknown): msg is Message {
+export function isValidMessage(msg: unknown): msg is PersistedMessage {
   // Must be an object and not null
   if (typeof msg !== 'object' || msg === null) {
     return false;
@@ -52,15 +52,23 @@ export function isValidMessage(msg: unknown): msg is Message {
     return false;
   }
 
-  // Check for required field: content (string or array for multimodal)
-  if (!('content' in msg)) {
+  // Check for required field: content (string or array) or parts (AI SDK v6)
+  if (!('content' in msg) && !('parts' in msg)) {
     return false;
   }
 
   const content = (msg as any).content;
+  const parts = (msg as any).parts;
 
-  // Content can be a string or an array (for multimodal messages)
-  if (typeof content !== 'string' && !Array.isArray(content)) {
+  if (content !== undefined) {
+    if (typeof content !== 'string' && !Array.isArray(content)) {
+      return false;
+    }
+  } else if (parts !== undefined) {
+    if (!Array.isArray(parts)) {
+      return false;
+    }
+  } else {
     return false;
   }
 
@@ -80,8 +88,8 @@ export function isValidMessage(msg: unknown): msg is Message {
  * console.log(`Loaded ${validMessages.length} valid messages`);
  * ```
  */
-export function validateMessages(messages: unknown[]): Message[] {
-  return messages.filter((msg): msg is Message => isValidMessage(msg));
+export function validateMessages(messages: unknown[]): PersistedMessage[] {
+  return messages.filter((msg): msg is PersistedMessage => isValidMessage(msg));
 }
 
 /**
@@ -100,7 +108,7 @@ export function isValidRole(role: string): role is 'user' | 'assistant' | 'syste
  * @param msg - The message to check
  * @returns True if the message has no meaningful content
  */
-export function isMessageEmpty(msg: Message): boolean {
+export function isMessageEmpty(msg: PersistedMessage): boolean {
   const content = msg.content;
 
   if (typeof content === 'string') {
@@ -115,6 +123,13 @@ export function isMessageEmpty(msg: Message): boolean {
     return (content as unknown[]).length === 0;
   }
 
+  // AI SDK v6: UIMessage uses parts array instead of content
+  const parts = (msg as any).parts;
+
+  if (Array.isArray(parts)) {
+    return !parts.some((p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0);
+  }
+
   return true;
 }
 
@@ -127,7 +142,7 @@ export function isMessageEmpty(msg: Message): boolean {
  * @param msg - The message to check
  * @returns True if the message should be hidden from UI
  */
-export function isMessageHidden(msg: Message): boolean {
+export function isMessageHidden(msg: PersistedMessage): boolean {
   if (!msg.annotations || !Array.isArray(msg.annotations)) {
     return false;
   }
@@ -152,6 +167,6 @@ export function isMessageHidden(msg: Message): boolean {
  * @param msg - The message
  * @returns A valid message ID string
  */
-export function getSafeMessageId(msg: Message): string {
+export function getSafeMessageId(msg: PersistedMessage): string {
   return msg.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }

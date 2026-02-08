@@ -1,8 +1,8 @@
 import Cookies from 'js-cookie';
-import { type Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import { getAllChats, deleteChat } from '~/lib/persistence/chats';
 
-interface ExtendedMessage extends Message {
+interface ExtendedMessage extends PersistedMessage {
   name?: string;
   function_call?: any;
   timestamp?: number;

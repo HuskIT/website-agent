@@ -7,8 +7,7 @@
  * From specs/001-load-project-messages/tasks.md (T025)
  */
 
-import type { Message } from 'ai';
-import type { MergeResult, SequencedMessage } from '~/types/message-loading';
+import type { MergeResult, SequencedMessage, PersistedMessage } from '~/types/message-loading';
 import { createScopedLogger } from '~/utils/logger';
 import { isMessageEmpty } from './messageValidation';
 
@@ -48,7 +47,7 @@ const logger = createScopedLogger('MessageMerge');
  * // result.duplicatesRemoved = 1
  * ```
  */
-export function mergeMessages(serverMessages: Message[], localMessages: Message[]): MergeResult {
+export function mergeMessages(serverMessages: PersistedMessage[], localMessages: PersistedMessage[]): MergeResult {
   logger.debug('Merging messages', {
     serverCount: serverMessages.length,
     localCount: localMessages.length,

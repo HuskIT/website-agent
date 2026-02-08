@@ -1,4 +1,4 @@
-import type { Message } from 'ai';
+import type { UIMessage } from 'ai';
 import { Fragment } from 'react';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
@@ -29,8 +29,8 @@ interface MessagesProps {
   id?: string;
   className?: string;
   isStreaming?: boolean;
-  messages?: Message[];
-  append?: (message: Message) => void;
+  messages?: UIMessage[];
+  append?: (message: UIMessage) => void;
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   model?: string;
@@ -89,7 +89,22 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
         <div className="space-y-6">
           {messages.length > 0
             ? messages.map((message, index) => {
-                const { role, content, id: messageId, annotations, parts, createdAt } = message;
+                const { role, id: messageId, parts } = message;
+
+                /*
+                 * Extract content, annotations, and createdAt from UIMessage
+                 * In v6, UIMessage uses parts-based structure; content/annotations/createdAt
+                 * may exist on persisted messages passed through as UIMessage via casting
+                 */
+                const content =
+                  (message as any).content ??
+                  parts
+                    ?.filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+                    .map((p) => p.text)
+                    .join('') ??
+                  '';
+                const annotations = (message as any).annotations;
+                const createdAt = (message as any).createdAt;
                 const isUserMessage = role === 'user';
                 const isHidden = annotations?.includes('hidden');
                 const timestamp = createdAt ? new Date(createdAt) : undefined;
@@ -98,14 +113,19 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                   return <Fragment key={index} />;
                 }
 
+                // Skip empty assistant placeholder messages (AI SDK v6 creates these before streaming)
+                if (!isUserMessage && typeof content === 'string' && content.trim().length === 0) {
+                  return <Fragment key={index} />;
+                }
+
                 return (
                   <div key={index} className="w-full">
                     {isUserMessage ? (
-                      <UserMessage content={content} parts={parts} timestamp={timestamp} />
+                      <UserMessage content={content} parts={parts as any} timestamp={timestamp} />
                     ) : (
                       <AssistantMessage
                         content={content}
-                        annotations={message.annotations}
+                        annotations={annotations}
                         messageId={messageId}
                         onRewind={handleRewind}
                         onFork={handleFork}
@@ -114,7 +134,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         setChatMode={props.setChatMode}
                         model={props.model}
                         provider={props.provider}
-                        parts={parts}
+                        parts={parts as any}
                         addToolResult={props.addToolResult}
                         timestamp={timestamp}
                       />

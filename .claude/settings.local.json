@@ -68,7 +68,18 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(grep:*)",
-      "mcp__nia__nia_research"
+      "mcp__nia__nia_research",
+      "Bash(npx bd list:*)",
+      "Bash(pnpm exec bd list:*)",
+      "Bash(npx beads:*)",
+      "Bash(npx bd:*)",
+      "Bash(/opt/homebrew/bin/bd show:*)",
+      "Bash(/opt/homebrew/bin/bd list:*)",
+      "Bash(/opt/homebrew/bin/bd ready:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash([:*)",
+      "Bash(. \"$NVM_DIR/nvm.sh\")",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

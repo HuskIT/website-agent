@@ -1048,7 +1048,7 @@ function formatMenuForPrompt(menu: Menu | undefined): string {
   return menu.categories
     .slice(0, 4)
     .map((category) => {
-      const items = category.items
+      const items = (category.items ?? [])
         .slice(0, 6)
         .map((item) => {
           const price = item.price ? ` (${item.price})` : '';

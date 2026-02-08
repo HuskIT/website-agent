@@ -87,17 +87,40 @@ export const defaultLoaderOptions: MessageLoaderOptions = {
   maxDelay: 30000,
 };
 
+import type { JSONValue } from 'ai';
+
+/**
+ * Persisted message format matching the database schema.
+ * Decoupled from AI SDK's UIMessage (which uses parts-based structure in v6).
+ * Used throughout the persistence layer for DB reads/writes.
+ */
+export interface PersistedMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  annotations?: JSONValue[];
+  createdAt?: Date | string;
+}
+
+/**
+ * Extended PersistedMessage that includes sequence_num.
+ * Used when messages are loaded from the server with sequence information.
+ */
+export interface SequencedMessage extends PersistedMessage {
+  sequence_num?: number;
+}
+
 /**
  * Return type from the message loader.
  * Contains the loaded messages and metadata about the load operation.
  */
 export interface MessageLoadResult {
-  messages: Message[]; // Loaded messages in AI SDK format
-  total: number; // Total number of messages
-  source: 'server' | 'local' | 'merged'; // Source of messages
-  isPartial: boolean; // True if rate limited before complete
-  loadedFromServer: number; // Count from server
-  loadedFromLocal: number; // Count from local (if merged)
+  messages: PersistedMessage[];
+  total: number;
+  source: 'server' | 'local' | 'merged';
+  isPartial: boolean;
+  loadedFromServer: number;
+  loadedFromLocal: number;
 }
 
 /**
@@ -105,19 +128,8 @@ export interface MessageLoadResult {
  * Contains statistics about the merge result.
  */
 export interface MergeResult {
-  messages: Message[]; // Merged and sorted messages
-  serverCount: number; // Number of messages from server
-  localOnlyCount: number; // Number of local-only messages
-  duplicatesRemoved: number; // Number of duplicate messages removed
+  messages: PersistedMessage[];
+  serverCount: number;
+  localOnlyCount: number;
+  duplicatesRemoved: number;
 }
-
-/**
- * Extended Message interface that includes sequence_num.
- * This is used when messages are loaded from the server with sequence information.
- */
-export interface SequencedMessage extends Message {
-  sequence_num?: number;
-}
-
-// Import Message type from AI SDK for use in our interfaces
-import type { Message } from 'ai';

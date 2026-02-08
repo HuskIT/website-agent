@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { selectContext, getFilePaths } from '~/lib/.server/llm/select-context';
 import type { FileMap } from '~/lib/.server/llm/constants';
-import type { Message } from 'ai';
+import type { LegacyMessage } from '~/lib/.server/llm/utils';
 
 // Mock the logger to avoid console output during tests
 vi.mock('~/utils/logger', () => ({
@@ -115,8 +115,8 @@ describe('selectContext integration', () => {
   };
 
   // Helper to create mock messages
-  const createMessages = (content: string, history: string[] = []): Message[] => {
-    const messages: Message[] = history.map((text) => ({
+  const createMessages = (content: string, history: string[] = []): LegacyMessage[] => {
+    const messages: LegacyMessage[] = history.map((text) => ({
       id: `msg-${Math.random()}`,
       role: 'user' as const,
       content: text,
@@ -334,7 +334,7 @@ describe('selectContext integration', () => {
 
   describe('error handling', () => {
     it('throws error when no user message found', async () => {
-      const messages: Message[] = [{ id: '1', role: 'assistant', content: 'Hello' }];
+      const messages: LegacyMessage[] = [{ id: '1', role: 'assistant', content: 'Hello' }];
 
       await expect(
         selectContext({

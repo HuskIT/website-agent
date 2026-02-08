@@ -1,8 +1,9 @@
-import type { CoreTool, GenerateTextResult, Message } from 'ai';
+import type { GenerateTextResult } from 'ai';
 import ignore from 'ignore';
 import { IGNORE_PATTERNS, type FileMap } from './constants';
 import { createScopedLogger } from '~/utils/logger';
 import { getContextFiles, grepForSpecificText } from './context';
+import type { LegacyMessage } from './utils';
 
 // Common patterns to ignore, similar to .gitignore
 
@@ -10,11 +11,11 @@ const ig = ignore().add(IGNORE_PATTERNS);
 const logger = createScopedLogger('select-context');
 
 export async function selectContext(props: {
-  messages: Message[];
+  messages: LegacyMessage[];
   files: FileMap;
   summary: string;
   recentlyEdited?: string[];
-  onFinish?: (resp: GenerateTextResult<Record<string, CoreTool<any, any>>, never>) => void;
+  onFinish?: (resp: GenerateTextResult<never, never>) => void;
 }) {
   const startTime = performance.now();
   const { messages, files, recentlyEdited = [], onFinish } = props;
@@ -27,9 +28,9 @@ export async function selectContext(props: {
   });
 
   // Extract text content from message (handles both string and array content)
-  const extractTextContent = (message: Message) =>
+  const extractTextContent = (message: LegacyMessage) =>
     Array.isArray(message.content)
-      ? (message.content.find((item) => item.type === 'text')?.text as string) || ''
+      ? (message.content.find((item: any) => item.type === 'text')?.text as string) || ''
       : message.content;
 
   // Get last user message for keyword matching
@@ -99,12 +100,11 @@ export async function selectContext(props: {
       toolCalls: [],
       toolResults: [],
       request: {},
-      experimental_providerMetadata: undefined,
       providerMetadata: undefined,
       roundtrips: [],
       steps: [],
       responseMessages: [],
-    } as unknown as GenerateTextResult<Record<string, CoreTool<any, any>>, never>;
+    } as unknown as GenerateTextResult<never, never>;
     onFinish(mockResponse);
   }
 

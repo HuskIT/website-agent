@@ -1,7 +1,7 @@
 import { BaseProvider } from '~/lib/modules/llm/base-provider';
 import type { ModelInfo } from '~/lib/modules/llm/types';
 import type { IProviderSetting } from '~/types/model';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 
 /*
@@ -49,7 +49,7 @@ export default class MoonshotProvider extends BaseProvider {
     serverEnv: Env;
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
-  }): LanguageModelV1 {
+  }): LanguageModel {
     const { model, serverEnv, apiKeys, providerSettings } = options;
 
     const { apiKey } = this.getProviderBaseUrlAndKey({
@@ -64,20 +64,34 @@ export default class MoonshotProvider extends BaseProvider {
       throw new Error(`Missing API key for ${this.name} provider`);
     }
 
+    const kimiHeaders: Record<string, string> = {
+      'User-Agent': 'KimiCLI/1.3',
+      'X-Msh-Platform': 'kimi_cli',
+      'X-Msh-Version': '1.3.0',
+      'X-Msh-Device-Name': 'website-agent',
+      'X-Msh-Device-Model': 'Node.js Server',
+      'X-Msh-Os-Version': typeof process !== 'undefined' ? process.version : 'unknown',
+      'X-Msh-Device-Id': getDeviceIdFromApiKey(apiKey),
+    };
+
     const openai = createOpenAI({
       baseURL: 'https://api.kimi.com/coding/v1',
       apiKey,
-      headers: {
-        'User-Agent': 'KimiCLI/1.3',
-        'X-Msh-Platform': 'kimi_cli',
-        'X-Msh-Version': '1.3.0',
-        'X-Msh-Device-Name': 'huskit-website-agent',
-        'X-Msh-Device-Model': 'Node.js Server',
-        'X-Msh-Os-Version': typeof process !== 'undefined' ? process.version : 'unknown',
-        'X-Msh-Device-Id': getDeviceIdFromApiKey(apiKey),
+      headers: kimiHeaders,
+      fetch: async (url, init) => {
+        const headers = new Headers(init?.headers);
+
+        /*
+         * AI SDK's withUserAgentSuffix() appends SDK version strings to User-Agent,
+         * but Kimi's API performs strict validation and rejects modified values.
+         * Override it back to the exact value Kimi expects.
+         */
+        headers.set('User-Agent', 'KimiCLI/1.3');
+
+        return globalThis.fetch(url, { ...init, headers });
       },
     });
 
-    return openai(model);
+    return openai.chat(model);
   }
 }
