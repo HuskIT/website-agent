@@ -440,7 +440,7 @@ export class WorkbenchStore {
     sandboxProvider?: SandboxProviderType | null,
     userPreference?: SandboxProviderType,
   ): Promise<{ success: boolean; provider: SandboxProvider | null; restored: boolean }> {
-    console.log('🔥🔥🔥 reconnectOrRestore CALLED', { projectId, userId, sandboxId, sandboxProvider, userPreference });
+    logger.debug('reconnectOrRestore CALLED', { projectId, userId, sandboxId, sandboxProvider, userPreference });
     logger.info('Attempting to reconnect or restore session', {
       projectId,
       hasSandboxId: !!sandboxId,
@@ -491,7 +491,7 @@ export class WorkbenchStore {
         // Ensure userId is defined
         const effectiveUserId = userId || 'anonymous';
 
-        console.log('[WorkbenchStore] Creating provider for reconnect', { sandboxId, providerType });
+        logger.debug('[WorkbenchStore] Creating provider for reconnect', { sandboxId, providerType });
 
         // Create provider without connecting (we'll reconnect instead)
         const provider = await createSandboxProvider(
@@ -507,7 +507,7 @@ export class WorkbenchStore {
           { skipConnect: true }, // Skip connect - we'll reconnect instead
         );
 
-        console.log('[WorkbenchStore] Provider created, attempting reconnect', {
+        logger.debug('[WorkbenchStore] Provider created, attempting reconnect', {
           sandboxId,
           providerStatus: provider.status,
         });
@@ -515,7 +515,7 @@ export class WorkbenchStore {
         // Try to reconnect to existing sandbox
         const reconnected = await provider.reconnect(sandboxId);
 
-        console.log('[WorkbenchStore] Reconnect result:', { reconnected, providerStatus: provider.status });
+        logger.debug('[WorkbenchStore] Reconnect result:', { reconnected, providerStatus: provider.status });
 
         if (reconnected) {
           logger.info('Successfully reconnected to existing sandbox', { sandboxId });
@@ -567,7 +567,7 @@ export class WorkbenchStore {
            * If it is, skip the full file re-upload + npm install + dev start cycle
            * and just populate the local editor file store.
            */
-          console.log('🔥 Reconnected successfully, checking if dev server is already running');
+          logger.debug('Reconnected successfully, checking if dev server is already running');
 
           let sandboxAlreadyRunning = false;
 
@@ -586,7 +586,7 @@ export class WorkbenchStore {
               if (healthData.ready) {
                 sandboxAlreadyRunning = true;
                 logger.info('Sandbox dev server already running, skipping full restore', { sandboxId });
-                console.log('🔥 Sandbox already running — skipping file upload + npm install');
+                logger.debug('Sandbox already running — skipping file upload + npm install');
 
                 // Populate editor file tree from DB snapshot (no upload)
                 await this.#loadSnapshotIntoFileStore();
@@ -638,7 +638,7 @@ export class WorkbenchStore {
             sandboxId,
             reason: 'Sandbox expired or stopped',
           });
-          console.log('⚠️ Sandbox reconnection failed - sandbox may have expired after 5 minutes');
+          logger.debug('Sandbox reconnection failed - sandbox may have expired after 5 minutes');
 
           // Show user-friendly message
           this.loadingStatus.set('Previous session expired. Creating new sandbox...');
@@ -656,7 +656,7 @@ export class WorkbenchStore {
     }
 
     // If we get here, we need to create a new sandbox
-    console.log('🔥 Creating new sandbox session, providerType:', providerType);
+    logger.debug('Creating new sandbox session, providerType:', providerType);
     logger.info('Creating new sandbox session', {
       providerType,
       reason: sandboxId ? 'reconnect_failed' : 'no_sandbox_id',
@@ -664,7 +664,7 @@ export class WorkbenchStore {
 
     try {
       const provider = await this.initializeProvider(providerType, projectId, userId || 'anonymous');
-      console.log('🔥 Provider initialized:', {
+      logger.debug('Provider initialized:', {
         providerType,
         newSandboxId: provider.sandboxId,
         oldSandboxId: sandboxId,
@@ -673,7 +673,7 @@ export class WorkbenchStore {
 
       // Update database with new sandbox ID
       if (provider.sandboxId && provider.sandboxId !== sandboxId) {
-        console.log('🔥 Updating project with new sandbox ID:', {
+        logger.debug('Updating project with new sandbox ID:', {
           oldSandboxId: sandboxId,
           newSandboxId: provider.sandboxId,
           projectId,
@@ -710,7 +710,7 @@ export class WorkbenchStore {
 
       // For Vercel provider, try to restore files from database snapshot
       if (providerType === 'vercel') {
-        console.log('🔥 Calling restoreFromDatabaseSnapshot for vercel provider');
+        logger.debug('Calling restoreFromDatabaseSnapshot for vercel provider');
 
         try {
           const restored = await this.restoreFromDatabaseSnapshot();
@@ -1301,18 +1301,18 @@ export class WorkbenchStore {
    * Called when creating a new sandbox to restore previous state.
    */
   async restoreFromDatabaseSnapshot(): Promise<boolean> {
-    console.log('🔥 restoreFromDatabaseSnapshot CALLED');
+    logger.debug('restoreFromDatabaseSnapshot CALLED');
 
     const projectId = this.#currentProjectId;
 
     if (!projectId) {
-      console.log('🔥 restoreFromDatabaseSnapshot EARLY EXIT: no projectId');
+      logger.debug('restoreFromDatabaseSnapshot EARLY EXIT: no projectId');
       logger.warn('No active project to restore snapshot for');
 
       return false;
     }
 
-    console.log('🔥 restoreFromDatabaseSnapshot: proceeding with projectId:', projectId);
+    logger.debug('restoreFromDatabaseSnapshot: proceeding with projectId:', projectId);
     logger.info('Restoring from database snapshot', { projectId });
     this.loadingStatus.set('Restoring Files...');
 
@@ -1350,7 +1350,7 @@ export class WorkbenchStore {
       logger.info(`Restoring ${fileCount} files from snapshot`, { projectId, snapshotUpdatedAt: snapshot.updated_at });
 
       // DEBUG: Log state before any operations
-      console.log('[DEBUG restoreFromDatabaseSnapshot] Starting restore:', {
+      logger.debug('[DEBUG restoreFromDatabaseSnapshot] Starting restore:', {
         projectId,
         fileCount,
         hasSandboxProvider: !!this.#sandboxProvider,
@@ -1361,7 +1361,7 @@ export class WorkbenchStore {
       savedFileSyncManager = this.#fileSyncManager;
 
       if (this.#fileSyncManager) {
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Flushing and disabling FileSyncManager');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Flushing and disabling FileSyncManager');
         await this.#fileSyncManager.flushWrites();
         this.#fileSyncManager = null;
         this.#filesStore.setFileSyncManager(null);
@@ -1406,7 +1406,7 @@ export class WorkbenchStore {
       logger.info('File store populated from snapshot', { projectId, fileCount });
 
       // DEBUG: Log provider state before upload
-      console.log('[DEBUG restoreFromDatabaseSnapshot] Provider state:', {
+      logger.debug('[DEBUG restoreFromDatabaseSnapshot] Provider state:', {
         hasSandboxProvider: !!this.#sandboxProvider,
         providerType: this.#sandboxProvider?.type,
         providerStatus: this.#sandboxProvider?.status,
@@ -1441,7 +1441,7 @@ export class WorkbenchStore {
           .filter(([filePath, fileData]) => {
             // Skip invalid entries
             if (!fileData || typeof fileData.content !== 'string') {
-              console.warn('[restoreFromDatabaseSnapshot] Skipping invalid file entry:', fileData);
+              logger.warn('[restoreFromDatabaseSnapshot] Skipping invalid file entry:', fileData);
               return false;
             }
 
@@ -1482,7 +1482,7 @@ export class WorkbenchStore {
             }
           });
 
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Prepared files:', {
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Prepared files:', {
           total: apiFiles.length,
           sample: apiFiles[0]
             ? {
@@ -1499,7 +1499,7 @@ export class WorkbenchStore {
 
         this.loadingStatus.set(`Syncing to Sandbox (v3 - Fresh, ${chunks.length} batches)...`);
 
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Starting chunked upload:', {
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Starting chunked upload:', {
           totalFiles: apiFiles.length,
           chunkCount: chunks.length,
           firstChunkFiles: chunks[0]?.length,
@@ -1510,7 +1510,7 @@ export class WorkbenchStore {
           const chunk = chunks[i];
           const chunkSize = chunk.reduce((sum, f) => sum + ((f as any).size || 0), 0);
 
-          console.log(
+          logger.debug(
             `[DEBUG restoreFromDatabaseSnapshot] Uploading chunk ${i + 1}/${chunks.length} (${chunk.length} files, ~${(chunkSize / 1024 / 1024).toFixed(4)}MB)`,
           );
 
@@ -1526,7 +1526,7 @@ export class WorkbenchStore {
               })),
             };
 
-            console.log('[DEBUG] Request body sample:', {
+            logger.debug('[DEBUG] Request body sample:', {
               projectId: requestBody.projectId,
               sandboxId: requestBody.sandboxId,
               fileCount: requestBody.files.length,
@@ -1553,7 +1553,7 @@ export class WorkbenchStore {
                 details?: string;
                 shouldRecreate?: boolean;
               };
-              console.error('[restoreFromDatabaseSnapshot] Upload error details:', {
+              logger.error('[restoreFromDatabaseSnapshot] Upload error details:', {
                 status: response.status,
                 code: errorData.code,
                 error: errorData.error,
@@ -1571,7 +1571,7 @@ export class WorkbenchStore {
               );
             }
 
-            console.log(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
+            logger.debug(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} SUCCESS`);
 
             /*
              * Short pause between chunks to avoid burst rate-limiting.
@@ -1581,40 +1581,40 @@ export class WorkbenchStore {
               await new Promise((resolve) => setTimeout(resolve, 200));
             }
           } catch (writeError) {
-            console.error(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} FAILED:`, writeError);
+            logger.error(`[DEBUG restoreFromDatabaseSnapshot] Chunk ${i + 1}/${chunks.length} FAILED:`, writeError);
             throw writeError;
           }
         }
 
         logger.info('Chunked file upload complete', { projectId, fileCount, chunks: chunks.length });
-        console.log('[DEBUG restoreFromDatabaseSnapshot] All chunks uploaded successfully');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] All chunks uploaded successfully');
 
         // Verify upload by counting files in sandbox
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Verifying upload with find command');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Verifying upload with find command');
 
         try {
           const findResult = await this.#sandboxProvider.runCommand('find', ['.', '-type', 'f']);
           const uploadedFileCount = findResult.stdout.split('\n').filter((line) => line.trim()).length;
-          console.log(
+          logger.debug(
             '[DEBUG restoreFromDatabaseSnapshot] Files in sandbox:',
             uploadedFileCount,
             'Expected:',
             apiFiles.length,
           );
         } catch (findError) {
-          console.warn('[DEBUG restoreFromDatabaseSnapshot] find command failed:', findError);
+          logger.warn('[DEBUG restoreFromDatabaseSnapshot] find command failed:', findError);
         }
 
         // Patch vite.config.ts to allow Vercel sandbox hosts (before starting dev server)
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Patching vite.config.ts for Vercel Sandbox...');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Patching vite.config.ts for Vercel Sandbox...');
         await this.#patchViteConfigForVercel();
 
         // Fire-and-forget: install deps + start dev server
-        console.log('[DEBUG restoreFromDatabaseSnapshot] Calling #autoStartDevServer');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Calling #autoStartDevServer');
         this.loadingStatus.set('Starting Preview...');
         await this.#autoStartDevServer(snapshot.files);
       } else {
-        console.warn('[DEBUG restoreFromDatabaseSnapshot] SKIPPED upload: sandboxProvider is null');
+        logger.warn('[DEBUG restoreFromDatabaseSnapshot] SKIPPED upload: sandboxProvider is null');
       }
 
       logger.info('Snapshot restored successfully', { projectId, fileCount });
@@ -1637,7 +1637,7 @@ export class WorkbenchStore {
       if (savedFileSyncManager) {
         this.#fileSyncManager = savedFileSyncManager;
         this.#filesStore.setFileSyncManager(savedFileSyncManager);
-        console.log('[DEBUG restoreFromDatabaseSnapshot] FileSyncManager restored (in finally)');
+        logger.debug('[DEBUG restoreFromDatabaseSnapshot] FileSyncManager restored (in finally)');
       }
     }
   }
@@ -1648,27 +1648,27 @@ export class WorkbenchStore {
    * (required for Vercel Sandbox port proxying).
    */
   async #autoStartDevServer(files: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
-    console.log('[DEBUG #autoStartDevServer] Starting auto-start process');
+    logger.debug('[DEBUG #autoStartDevServer] Starting auto-start process');
 
     const provider = this.#sandboxProvider;
 
     if (!provider) {
-      console.warn('[DEBUG #autoStartDevServer] No provider available');
+      logger.warn('[DEBUG #autoStartDevServer] No provider available');
       return;
     }
 
-    console.log('[DEBUG #autoStartDevServer] Provider available:', { type: provider.type, status: provider.status });
+    logger.debug('[DEBUG #autoStartDevServer] Provider available:', { type: provider.type, status: provider.status });
 
     const pkgRaw = files['package.json'];
 
     if (!pkgRaw) {
       logger.warn('[autoStartDevServer] No package.json in snapshot – skipping auto-start');
-      console.warn('[DEBUG #autoStartDevServer] No package.json found');
+      logger.warn('[DEBUG #autoStartDevServer] No package.json found');
 
       return;
     }
 
-    console.log('[DEBUG #autoStartDevServer] Found package.json');
+    logger.debug('[DEBUG #autoStartDevServer] Found package.json');
 
     let pkg: { scripts?: Record<string, string> };
 
@@ -1690,7 +1690,7 @@ export class WorkbenchStore {
     }
 
     logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
-    console.log('[DEBUG #autoStartDevServer] About to run npm install with sandbox:', {
+    logger.debug('[DEBUG #autoStartDevServer] About to run npm install with sandbox:', {
       sandboxId: provider.sandboxId,
       providerType: provider.type,
       providerStatus: provider.status,
@@ -1701,10 +1701,10 @@ export class WorkbenchStore {
        * Await install so dependencies are available before starting the server
        * Use retry wrapper to handle sandbox expiration during long-running install
        */
-      console.log('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
+      logger.debug('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
 
       const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);
-      console.log('[DEBUG #autoStartDevServer] npm install completed:', {
+      logger.debug('[DEBUG #autoStartDevServer] npm install completed:', {
         exitCode: installResult.exitCode,
         stdout: installResult.stdout?.substring(0, 500),
         stderr: installResult.stderr?.substring(0, 500),
@@ -1716,7 +1716,7 @@ export class WorkbenchStore {
           stdout: installResult.stdout,
           stderr: installResult.stderr,
         });
-        console.error('[DEBUG #autoStartDevServer] npm install failed:', {
+        logger.error('[DEBUG #autoStartDevServer] npm install failed:', {
           exitCode: installResult.exitCode,
           stdout: installResult.stdout,
           stderr: installResult.stderr,
@@ -1725,10 +1725,10 @@ export class WorkbenchStore {
         return;
       }
 
-      console.log('[DEBUG #autoStartDevServer] npm install succeeded');
+      logger.debug('[DEBUG #autoStartDevServer] npm install succeeded');
 
       logger.info('[autoStartDevServer] npm install succeeded, starting server…');
-      console.log('[DEBUG #autoStartDevServer] npm install succeeded, starting dev server');
+      logger.debug('[DEBUG #autoStartDevServer] npm install succeeded, starting dev server');
 
       /*
        * Determine if this is a Vite project – if so, append --host so the dev
@@ -1737,7 +1737,7 @@ export class WorkbenchStore {
       const isVite = (scripts[scriptName] || '').includes('vite');
       const devArgs = isVite ? ['-c', `npm run ${scriptName} -- --host`] : ['-c', `npm run ${scriptName}`];
 
-      console.log('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
+      logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
 
       /*
        * Fire-and-forget: do NOT await – dev servers run indefinitely.
@@ -1762,7 +1762,7 @@ export class WorkbenchStore {
           logger.error('Dev server command failed unexpectedly', { error: msg });
         }
       });
-      console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
+      logger.debug('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
 
       // NOW register previews — dev server is starting, so the iframe can begin polling
       const previewUrls = provider.getPreviewUrls();
@@ -1779,7 +1779,7 @@ export class WorkbenchStore {
         raw: error,
       };
       logger.error('[autoStartDevServer] Error during auto-start', { error: errorDetails });
-      console.error('[DEBUG #autoStartDevServer] Error during auto-start:', errorDetails);
+      logger.error('[DEBUG #autoStartDevServer] Error during auto-start:', errorDetails);
     }
   }
 
@@ -1792,12 +1792,12 @@ export class WorkbenchStore {
     const projectId = this.#currentProjectId;
 
     if (!provider || !projectId) {
-      console.log('[patchViteConfigForVercel] Skipping: no provider or projectId');
+      logger.debug('[patchViteConfigForVercel] Skipping: no provider or projectId');
       return;
     }
 
     try {
-      console.log('[patchViteConfigForVercel] Checking for vite.config file...');
+      logger.debug('[patchViteConfigForVercel] Checking for vite.config file...');
 
       // Check for vite.config.ts or vite.config.js
       let configFileName: string | null = null;
@@ -1810,7 +1810,7 @@ export class WorkbenchStore {
           if (result.exitCode === 0) {
             configFileName = fileName;
             configContent = result.stdout;
-            console.log(`[patchViteConfigForVercel] Found ${fileName}`);
+            logger.debug(`[patchViteConfigForVercel] Found ${fileName}`);
             break;
           }
         } catch {
@@ -1819,13 +1819,13 @@ export class WorkbenchStore {
       }
 
       if (!configFileName || !configContent) {
-        console.log('[patchViteConfigForVercel] No vite.config file found, skipping');
+        logger.debug('[patchViteConfigForVercel] No vite.config file found, skipping');
         return;
       }
 
       // Check if allowedHosts is already set
       if (configContent.includes('allowedHosts')) {
-        console.log('[patchViteConfigForVercel] allowedHosts already configured');
+        logger.debug('[patchViteConfigForVercel] allowedHosts already configured');
         return;
       }
 
@@ -1835,7 +1835,7 @@ export class WorkbenchStore {
       if (patchedContent.includes('server:')) {
         // Add allowedHosts to existing server config
         patchedContent = patchedContent.replace(/server:\s*{/g, 'server: {\n    allowedHosts: true,');
-        console.log('[patchViteConfigForVercel] Added allowedHosts to existing server config');
+        logger.debug('[patchViteConfigForVercel] Added allowedHosts to existing server config');
       } else {
         // Add new server config after plugins
         if (patchedContent.includes('plugins:')) {
@@ -1843,7 +1843,7 @@ export class WorkbenchStore {
             /plugins:\s*\[.*?\],/s,
             (match) => `${match}\n  server: {\n    host: '0.0.0.0',\n    allowedHosts: true,\n  },`,
           );
-          console.log('[patchViteConfigForVercel] Added new server config with allowedHosts');
+          logger.debug('[patchViteConfigForVercel] Added new server config with allowedHosts');
         }
       }
 
@@ -1870,11 +1870,11 @@ export class WorkbenchStore {
       }
 
       logger.info('[patchViteConfigForVercel] Successfully patched vite.config', { fileName: configFileName });
-      console.log('[patchViteConfigForVercel] ✅ Config patched and uploaded');
+      logger.debug('[patchViteConfigForVercel] Config patched and uploaded');
     } catch (error) {
       // Non-fatal - log and continue
       logger.warn('[patchViteConfigForVercel] Failed to patch config', { error });
-      console.warn('[patchViteConfigForVercel] Error:', error);
+      logger.warn('[patchViteConfigForVercel] Error:', error);
     }
   }
 
@@ -2183,7 +2183,7 @@ export class WorkbenchStore {
 
       return success;
     } catch (error) {
-      console.error('Failed to create file:', error);
+      logger.error('Failed to create file:', error);
       throw error;
     }
   }
@@ -2192,7 +2192,7 @@ export class WorkbenchStore {
     try {
       return await this.#filesStore.createFolder(folderPath);
     } catch (error) {
-      console.error('Failed to create folder:', error);
+      logger.error('Failed to create folder:', error);
       throw error;
     }
   }
@@ -2229,7 +2229,7 @@ export class WorkbenchStore {
 
       return success;
     } catch (error) {
-      console.error('Failed to delete file:', error);
+      logger.error('Failed to delete file:', error);
       throw error;
     }
   }
@@ -2272,7 +2272,7 @@ export class WorkbenchStore {
 
       return success;
     } catch (error) {
-      console.error('Failed to delete folder:', error);
+      logger.error('Failed to delete folder:', error);
       throw error;
     }
   }
@@ -2311,7 +2311,7 @@ export class WorkbenchStore {
     }
 
     // Log provider state when creating artifact
-    console.log('[WorkbenchStore] addArtifact - creating ActionRunner', {
+    logger.debug('[WorkbenchStore] addArtifact - creating ActionRunner', {
       artifactId: id,
       messageId,
       hasProvider: !!this.#sandboxProvider,
@@ -2665,11 +2665,11 @@ export class WorkbenchStore {
         try {
           const resp = await octokit.repos.get({ owner, repo: repoName });
           repo = resp.data;
-          console.log('Repository already exists, using existing repo');
+          logger.debug('Repository already exists, using existing repo');
 
           // Check if we need to update visibility of existing repo
           if (repo.private !== isPrivate) {
-            console.log(
+            logger.debug(
               `Updating repository visibility from ${repo.private ? 'private' : 'public'} to ${isPrivate ? 'private' : 'public'}`,
             );
 
@@ -2681,15 +2681,15 @@ export class WorkbenchStore {
                 private: isPrivate,
               });
 
-              console.log('Repository visibility updated successfully');
+              logger.debug('Repository visibility updated successfully');
               repo = updatedRepo;
               visibilityJustChanged = true;
 
               // Add a delay after changing visibility to allow GitHub to fully process the change
-              console.log('Waiting for visibility change to propagate...');
+              logger.debug('Waiting for visibility change to propagate...');
               await new Promise((resolve) => setTimeout(resolve, 3000)); // 3 second delay
             } catch (visibilityError) {
-              console.error('Failed to update repository visibility:', visibilityError);
+              logger.error('Failed to update repository visibility:', visibilityError);
 
               // Continue with push even if visibility update fails
             }
@@ -2697,7 +2697,7 @@ export class WorkbenchStore {
         } catch (error) {
           if (error instanceof Error && 'status' in error && error.status === 404) {
             // Repository doesn't exist, so create a new one
-            console.log(`Creating new repository with private=${isPrivate}`);
+            logger.debug(`Creating new repository with private=${isPrivate}`);
 
             // Create new repository with specified privacy setting
             const createRepoOptions = {
@@ -2706,18 +2706,18 @@ export class WorkbenchStore {
               auto_init: true,
             };
 
-            console.log('Create repo options:', createRepoOptions);
+            logger.debug('Create repo options:', createRepoOptions);
 
             const { data: newRepo } = await octokit.repos.createForAuthenticatedUser(createRepoOptions);
 
-            console.log('Repository created:', newRepo.html_url, 'Private:', newRepo.private);
+            logger.debug('Repository created:', newRepo.html_url, 'Private:', newRepo.private);
             repo = newRepo;
 
             // Add a small delay after creating a repository to allow GitHub to fully initialize it
-            console.log('Waiting for repository to initialize...');
+            logger.debug('Waiting for repository to initialize...');
             await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 second delay
           } else {
-            console.error('Cannot create repo:', error);
+            logger.error('Cannot create repo:', error);
             throw error; // Some other error occurred
           }
         }
@@ -2734,7 +2734,7 @@ export class WorkbenchStore {
           const maxAttempts = 3;
 
           try {
-            console.log(`Pushing files to repository (attempt ${attempt}/${maxAttempts})...`);
+            logger.debug(`Pushing files to repository (attempt ${attempt}/${maxAttempts})...`);
 
             // Create blobs for each file
             const blobs = await Promise.all(
@@ -2801,16 +2801,16 @@ export class WorkbenchStore {
               sha: newCommit.sha,
             });
 
-            console.log('Files successfully pushed to repository');
+            logger.debug('Files successfully pushed to repository');
 
             return repo.html_url;
           } catch (error) {
-            console.error(`Error during push attempt ${attempt}:`, error);
+            logger.error(`Error during push attempt ${attempt}:`, error);
 
             // If we've just changed visibility and this is not our last attempt, wait and retry
             if ((visibilityJustChanged || attempt === 1) && attempt < maxAttempts) {
               const delayMs = attempt * 2000; // Increasing delay with each attempt
-              console.log(`Waiting ${delayMs}ms before retry...`);
+              logger.debug(`Waiting ${delayMs}ms before retry...`);
               await new Promise((resolve) => setTimeout(resolve, delayMs));
 
               return pushFilesToRepo(attempt + 1);
@@ -2885,7 +2885,7 @@ export class WorkbenchStore {
       // Should not reach here since we only handle GitHub and GitLab
       throw new Error(`Unsupported provider: ${provider}`);
     } catch (error) {
-      console.error('Error pushing to repository:', error);
+      logger.error('Error pushing to repository:', error);
       throw error; // Rethrow the error for further handling
     }
   }

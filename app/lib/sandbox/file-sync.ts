@@ -8,6 +8,9 @@
 
 import type { SandboxProvider } from './types';
 import type { FileSyncState } from '~/types/sandbox';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('FileSyncManager');
 
 type SyncStateCallback = (state: FileSyncState) => void;
 
@@ -46,7 +49,6 @@ const DEFAULT_CONFIG: Required<Omit<FileSyncConfig, 'onSyncFailure' | 'onSyncSuc
  * and the sandbox provider, handling batching, debouncing, and error recovery.
  */
 export class FileSyncManager {
-  private _instanceId = Math.random().toString(36).substring(7);
   private _provider: SandboxProvider | null = null;
   private _config: Required<Omit<FileSyncConfig, 'onSyncFailure' | 'onSyncSuccess'>>;
   private _state: FileSyncState = {
@@ -112,7 +114,7 @@ export class FileSyncManager {
     this._pendingContent.set(path, content);
 
     // Debounce the actual sync
-    console.log(`[FileSyncManager] queueWrite called for ${path}`, {
+    logger.debug(`queueWrite called for ${path}`, {
       pendingCount: this._state.pendingWrites.length,
       hasProvider: !!this._provider,
     });
@@ -199,7 +201,7 @@ export class FileSyncManager {
   }
 
   private async _performSync(): Promise<void> {
-    console.log(`[FileSyncManager:${this._instanceId}] _performSync called`, {
+    logger.debug('_performSync called', {
       hasProvider: !!this._provider,
       pendingWrites: this._state.pendingWrites.length,
       providerStatus: this._provider?.status,
@@ -207,7 +209,7 @@ export class FileSyncManager {
     });
 
     if (!this._provider || this._state.pendingWrites.length === 0) {
-      console.log('[FileSyncManager] Skipping sync - no provider or no pending writes');
+      logger.debug('Skipping sync - no provider or no pending writes');
       return;
     }
 
@@ -241,7 +243,7 @@ export class FileSyncManager {
       return;
     }
 
-    console.log('[FileSyncManager] Writing files to provider', {
+    logger.debug('Writing files to provider', {
       fileCount: files.length,
       paths: files.map((f) => f.path),
     });
@@ -252,7 +254,7 @@ export class FileSyncManager {
     for (let attempt = 0; attempt < this._config.maxRetries; attempt++) {
       try {
         await this._provider.writeFiles(files);
-        console.log('[FileSyncManager] Files written successfully', { fileCount: files.length });
+        logger.debug('Files written successfully', { fileCount: files.length });
 
         // Success - update synced timestamps
         const now = Date.now();
@@ -270,7 +272,7 @@ export class FileSyncManager {
 
         // If there are more pending files, process them immediately (no debounce)
         if (this._state.pendingWrites.length > 0) {
-          console.log('[FileSyncManager] More files pending, processing next batch immediately', {
+          logger.debug('More files pending, processing next batch immediately', {
             remaining: this._state.pendingWrites.length,
           });
           setTimeout(() => this._performSync(), 0);
