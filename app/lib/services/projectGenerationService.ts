@@ -306,12 +306,21 @@ export async function selectTemplate(
     model: fastModel,
   });
 
-  const fallback: TemplateSelection = {
-    themeId: 'indochineluxe',
-    name: 'Indochine Luxe',
-    title: 'Restaurant Website',
-    reasoning: 'Fallback template used due to selection failure.',
-  };
+  // Use the first available theme as fallback (should be a theme that actually exists in RESTAURANT_THEMES)
+  const firstAvailableTheme = RESTAURANT_THEMES[0];
+  const fallback: TemplateSelection = firstAvailableTheme
+    ? {
+        themeId: firstAvailableTheme.id,
+        name: firstAvailableTheme.templateName,
+        title: 'Restaurant Website',
+        reasoning: 'Fallback template used due to selection failure.',
+      }
+    : {
+        themeId: 'boldfeastv2',
+        name: 'Bold Feast v2',
+        title: 'Restaurant Website',
+        reasoning: 'Fallback template used due to selection failure.',
+      };
 
   try {
     const system = buildTemplateSelectionSystemPrompt();
@@ -339,19 +348,58 @@ export async function selectTemplate(
       return fallback;
     }
 
-    const respJson = (await response.json()) as { text?: string };
-    const parsed = parseTemplateSelection(respJson.text ?? '');
+    const respJson = (await response.json()) as any;
 
-    if (!parsed) {
-      logger.warn('[TEMPLATE_SELECTION] Could not parse LLM output, falling back', { text: respJson.text ?? '' });
+    // Check if the API returned an error
+    if (respJson.error) {
+      logger.warn('[TEMPLATE_SELECTION] LLM API returned an error, falling back', {
+        error: respJson.message || 'Unknown error',
+        statusCode: respJson.statusCode,
+      });
       return fallback;
     }
+
+    // Extract text from response (handle both old and new AI SDK formats)
+    let llmText: string | undefined;
+
+    if (respJson.text) {
+      // Old format: { text: "..." }
+      llmText = respJson.text;
+    } else if (respJson.steps && Array.isArray(respJson.steps) && respJson.steps.length > 0) {
+      // New format (AI SDK v6): { steps: [{ content: [{ type: "text", text: "..." }] }] }
+      const firstStep = respJson.steps[0];
+      const textContent = firstStep?.content?.find?.((c: any) => c.type === 'text');
+      llmText = textContent?.text;
+    }
+
+    logger.info('[TEMPLATE_SELECTION] Extracted LLM text', {
+      hasText: !!llmText,
+      textLength: llmText?.length ?? 0,
+      textPreview: llmText?.slice(0, 500) ?? '',
+    });
+
+    const parsed = parseTemplateSelection(llmText ?? '');
+
+    if (!parsed) {
+      logger.warn('[TEMPLATE_SELECTION] Could not parse LLM output, falling back', {
+        text: respJson.text ?? '',
+        textLength: respJson.text?.length ?? 0,
+      });
+      return fallback;
+    }
+
+    logger.info('[TEMPLATE_SELECTION] Parsed template name', {
+      templateName: parsed.templateName,
+      reasoning: parsed.reasoning,
+      title: parsed.title,
+    });
 
     const theme = getThemeByTemplateName(parsed.templateName);
 
     if (!theme) {
       logger.warn('[TEMPLATE_SELECTION] Unknown template returned, falling back', {
         templateName: parsed.templateName,
+        availableThemes: RESTAURANT_THEMES.map((t) => t.templateName),
       });
       return fallback;
     }
@@ -1048,7 +1096,7 @@ function formatMenuForPrompt(menu: Menu | undefined): string {
   return menu.categories
     .slice(0, 4)
     .map((category) => {
-      const items = category.items
+      const items = (category.items ?? [])
         .slice(0, 6)
         .map((item) => {
           const price = item.price ? ` (${item.price})` : '';

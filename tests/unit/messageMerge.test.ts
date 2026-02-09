@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { mergeMessages } from '~/lib/persistence/messageMerge';
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import type { SequencedMessage } from '~/types/message-loading';
 import { vi } from 'vitest';
 
@@ -112,7 +112,7 @@ describe('Message Merge', () => {
       expect(result.duplicatesRemoved).toBe(1);
 
       // Server version should be kept (sequence_num 1, not 99)
-      const msg = result.messages[0] as Message & { sequence_num?: number };
+      const msg = result.messages[0] as PersistedMessage & { sequence_num?: number };
       expect(msg.id).toBe('msg-1');
       expect(msg.sequence_num).toBe(1);
     });
@@ -160,7 +160,7 @@ describe('Message Merge', () => {
 
       // Check that messages are sorted correctly
       // msg-1 has sequence_num 1, msg-3 has sequence_num 3, msg-2 (local-only) gets sequence_num 4
-      const sequencedMessages = result.messages as Array<Message & { sequence_num?: number }>;
+      const sequencedMessages = result.messages as Array<PersistedMessage & { sequence_num?: number }>;
 
       const msg1Seq = sequencedMessages.find((m) => m.id === 'msg-1')?.sequence_num;
       const msg3Seq = sequencedMessages.find((m) => m.id === 'msg-3')?.sequence_num;
@@ -195,7 +195,7 @@ describe('Message Merge', () => {
 
       // Local-only messages should get sequence_num = maxServerSeq + 1 + index
       // maxServerSeq = 5, so msg-3 gets 6, msg-4 gets 7
-      const sequencedMessages = result.messages as Array<Message & { sequence_num?: number }>;
+      const sequencedMessages = result.messages as Array<PersistedMessage & { sequence_num?: number }>;
 
       const msg3 = sequencedMessages.find((m) => m.id === 'msg-3');
       const msg4 = sequencedMessages.find((m) => m.id === 'msg-4');

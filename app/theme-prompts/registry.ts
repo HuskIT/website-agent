@@ -19,7 +19,11 @@ import type { RestaurantTheme, RestaurantThemeId } from '~/types/restaurant-them
  * import FreshmarketPrompt from './Freshmarket.md?raw';
  * import GastrobotanicalPrompt from './Gastrobotanical.md?raw';
  */
+import Artisanhearthv3Prompt from './Artisanhearthv3.md?raw';
 import IndochineluxePrompt from './Indochineluxe.md?raw';
+import ChromaticstreetPrompt from './Chromaticstreet.md?raw';
+import FreshmarketPrompt from './Freshmarket.md?raw';
+import Boldfeastv2Prompt from './Boldfeastv2.md?raw';
 
 /*
  * import Noirluxev3Prompt from './Noirluxev3.md?raw';
@@ -115,6 +119,42 @@ export const RESTAURANT_THEMES: RestaurantTheme[] = [
     styleTags: ['luxurious', 'colonial', 'silk', 'architectural', 'elegant'],
     templateName: 'Indochine Luxe',
     prompt: IndochineluxePrompt,
+  },
+  {
+    id: 'artisanhearthv3',
+    label: 'The Artisan Hearth v3',
+    description: 'Rustic farm-to-table with handcrafted aesthetics and warm, organic textures',
+    cuisines: ['farm-to-table', 'american', 'new-american', 'organic', 'sustainable'],
+    styleTags: ['rustic', 'warm', 'handcrafted', 'organic', 'farmhouse'],
+    templateName: 'Artisan Hearth v3',
+    prompt: Artisanhearthv3Prompt,
+  },
+  {
+    id: 'freshmarket',
+    label: 'Fresh Market',
+    description: 'Bright and airy farmers market concept with fresh produce photography',
+    cuisines: ['mediterranean', 'healthy', 'vegetarian', 'farmers-market', 'light'],
+    styleTags: ['bright', 'airy', 'fresh', 'natural-lighting', 'produce-focused'],
+    templateName: 'Fresh Market',
+    prompt: FreshmarketPrompt,
+  },
+  {
+    id: 'chromaticstreet',
+    label: 'Chromatic Street',
+    description: 'Vibrant street food culture with neon accents and urban photography',
+    cuisines: ['street-food', 'fusion', 'food-truck', 'international', 'casual'],
+    styleTags: ['vibrant', 'neon', 'urban', 'street-art', 'photography-focused'],
+    templateName: 'Chromatic Street',
+    prompt: ChromaticstreetPrompt,
+  },
+  {
+    id: 'boldfeastv2',
+    label: 'Bold Feast v2',
+    description: 'Contemporary American bistro with bold flavors and industrial-chic design',
+    cuisines: ['american', 'contemporary', 'bistro', 'gastropub', 'craft-cocktails'],
+    styleTags: ['bold', 'industrial', 'contemporary', 'urban', 'gastropub'],
+    templateName: 'Bold Feast v2',
+    prompt: Boldfeastv2Prompt,
   },
 
   /*

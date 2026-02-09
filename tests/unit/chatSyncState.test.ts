@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import {
   getPendingMessageIds,
   markMessageAsPending,
@@ -205,7 +205,7 @@ describe('Message Sync State', () => {
 
   describe('Extract pending message IDs from messages', () => {
     it('should extract IDs from messages with pending annotation', () => {
-      const messages: Message[] = [
+      const messages: PersistedMessage[] = [
         { id: 'msg-1', role: 'user', content: 'Hello', createdAt: new Date() },
         addPendingSyncAnnotation({ id: 'msg-2', role: 'user', content: 'World', createdAt: new Date() }),
         { id: 'msg-3', role: 'assistant', content: 'Hi', createdAt: new Date() },
@@ -219,7 +219,7 @@ describe('Message Sync State', () => {
     });
 
     it('should return empty array when no pending messages', () => {
-      const messages: Message[] = [
+      const messages: PersistedMessage[] = [
         { id: 'msg-1', role: 'user', content: 'Hello', createdAt: new Date() },
         { id: 'msg-2', role: 'assistant', content: 'Hi', createdAt: new Date() },
       ];
@@ -236,7 +236,7 @@ describe('Message Sync State', () => {
 
   describe('Mark multiple messages as pending', () => {
     it('should mark all pending messages from list', () => {
-      const messages: Message[] = [
+      const messages: PersistedMessage[] = [
         { id: 'msg-1', role: 'user', content: 'Hello', createdAt: new Date() },
         addPendingSyncAnnotation({ id: 'msg-2', role: 'user', content: 'World', createdAt: new Date() }),
         addPendingSyncAnnotation({ id: 'msg-3', role: 'assistant', content: 'Hi', createdAt: new Date() }),
@@ -253,7 +253,7 @@ describe('Message Sync State', () => {
 
   describe('Initialize pending messages from store', () => {
     it('should initialize pending state from message annotations', () => {
-      const messages: Message[] = [
+      const messages: PersistedMessage[] = [
         addPendingSyncAnnotation({ id: 'msg-1', role: 'user', content: 'Hello', createdAt: new Date() }),
         addPendingSyncAnnotation({ id: 'msg-2', role: 'user', content: 'World', createdAt: new Date() }),
         { id: 'msg-3', role: 'assistant', content: 'Hi', createdAt: new Date() },
@@ -272,7 +272,7 @@ describe('Message Sync State', () => {
       markMessageAsPending(projectId, 'old-msg-1');
 
       // Initialize with new messages
-      const messages: Message[] = [
+      const messages: PersistedMessage[] = [
         addPendingSyncAnnotation({ id: 'msg-1', role: 'user', content: 'Hello', createdAt: new Date() }),
       ];
 

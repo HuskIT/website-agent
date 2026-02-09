@@ -77,7 +77,18 @@
       "Bash(pnpm install:*)",
       "Bash(xargs:*)",
       "Bash(git stash:*)",
-      "Bash(pnpm vitest:*)"
+      "Bash(pnpm vitest:*)",
+      "Bash(npx bd list:*)",
+      "Bash(pnpm exec bd list:*)",
+      "Bash(npx beads:*)",
+      "Bash(npx bd:*)",
+      "Bash(/opt/homebrew/bin/bd show:*)",
+      "Bash(/opt/homebrew/bin/bd list:*)",
+      "Bash(/opt/homebrew/bin/bd ready:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash([:*)",
+      "Bash(. \"$NVM_DIR/nvm.sh\")",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

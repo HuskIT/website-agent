@@ -1,7 +1,8 @@
 import { useLoaderData, useNavigate, useSearchParams } from '@remix-run/react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { atom } from 'nanostores';
-import { generateId, type JSONValue, type Message } from 'ai';
+import { generateId, type JSONValue } from 'ai';
+import type { PersistedMessage, SequencedMessage } from '~/types/message-loading';
 import { extractMessageAnnotations } from './annotationHelpers';
 import { toast } from 'react-toastify';
 import { workbenchStore } from '~/lib/stores/workbench';
@@ -32,7 +33,7 @@ import type { FileMap } from '~/lib/stores/files';
 import type { Snapshot } from './types';
 import { detectProjectCommands, createCommandActionsString } from '~/utils/projectCommands';
 import type { ContextAnnotation } from '~/types/context';
-import { sortMessagesBySequence, type SequencedMessage } from './messageSort';
+import { sortMessagesBySequence } from './messageSort';
 import type { MessageLoadProgress, MessageLoadingState } from '~/types/message-loading';
 import { initialLoadingState } from '~/types/message-loading';
 import { MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGES } from './chatSyncConstants';
@@ -53,7 +54,7 @@ export interface ChatHistoryItem {
   id: string;
   urlId?: string;
   description?: string;
-  messages: Message[];
+  messages: PersistedMessage[];
   timestamp: string;
   metadata?: IChatMetadata;
 }
@@ -70,8 +71,8 @@ export function useChatHistory(projectId?: string) {
   const { id: mixedId } = useLoaderData<{ id?: string }>();
   const [searchParams] = useSearchParams();
 
-  const [archivedMessages, setArchivedMessages] = useState<Message[]>([]);
-  const [initialMessages, setInitialMessages] = useState<Message[]>([]);
+  const [archivedMessages, setArchivedMessages] = useState<PersistedMessage[]>([]);
+  const [initialMessages, setInitialMessages] = useState<PersistedMessage[]>([]);
   const [ready, setReady] = useState<boolean>(false);
   const [urlId, setUrlId] = useState<string | undefined>();
   const [loadingState, setLoadingState] = useState<MessageLoadingState>(initialLoadingState);
@@ -282,7 +283,7 @@ export function useChatHistory(projectId?: string) {
         }
 
         let filteredMessages = storedMessages.messages.slice(startingIdx + 1, endingIdx);
-        let archivedMessages: Message[] = [];
+        let archivedMessages: PersistedMessage[] = [];
 
         if (startingIdx >= 0) {
           archivedMessages = storedMessages.messages.slice(0, startingIdx + 1);
@@ -889,7 +890,7 @@ ${value.content}
         logger.error(error);
       }
     },
-    storeMessageHistory: async (messages: Message[]) => {
+    storeMessageHistory: async (messages: PersistedMessage[]) => {
       if (!db || messages.length === 0) {
         return;
       }
@@ -1048,7 +1049,7 @@ ${value.content}
         logger.info(error);
       }
     },
-    importChat: async (description: string, messages: Message[], metadata?: IChatMetadata) => {
+    importChat: async (description: string, messages: PersistedMessage[], metadata?: IChatMetadata) => {
       if (!db) {
         return;
       }

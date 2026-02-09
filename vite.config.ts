@@ -5,6 +5,9 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import * as dotenv from 'dotenv';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 
 // Load environment variables from multiple files
 // Load environment variables from multiple files
@@ -20,7 +23,6 @@ export default defineConfig((config) => {
     },
     resolve: {
       alias: {
-        // Note: path alias moved to plugin for SSR-aware handling
         '@smithy/core/dist-es/getSmithyContext': '/test/stubs/smithy-get.ts',
         '@smithy/core/dist-es': '/test/stubs/smithy-index.ts',
       },
@@ -87,8 +89,8 @@ export default defineConfig((config) => {
               return { id: 'path', external: true };
             }
 
-            // For client-side, use path-browserify
-            return 'path-browserify';
+            // For client-side, resolve to the actual path-browserify file
+            return require.resolve('path-browserify');
           }
           return null;
         },
@@ -271,6 +273,14 @@ export default defineConfig((config) => {
       alias: {
         '@web3-storage/multipart-parser/esm/src/index.js': '/test/stubs/multipart-parser.ts',
       },
+      server: {
+        deps: {
+          inline: [
+            'tslib',
+            '@aws-crypto',
+          ],
+        },
+      },
       deps: {
         inline: [
           'ollama-ai-provider',
@@ -280,6 +290,9 @@ export default defineConfig((config) => {
           '@web3-storage/multipart-parser',
           '@web3-storage/multipart-parser/esm/src/index.js',
           '@smithy/core',
+          'tslib',
+          'better-auth',
+          '@aws-crypto',
         ],
         interopDefault: true,
       },

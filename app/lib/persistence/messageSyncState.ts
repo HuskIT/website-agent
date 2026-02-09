@@ -6,7 +6,7 @@
  */
 
 import type { ChatSyncState, SyncStatus } from './messageSyncTypes';
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import { isMessagePendingSync } from './annotationHelpers';
 
 /**
@@ -163,7 +163,7 @@ export function computeSyncStatus(
  * @param messages - Array of messages to check
  * @returns Array of message IDs that are pending sync
  */
-export function extractPendingMessageIds(messages: Message[]): string[] {
+export function extractPendingMessageIds(messages: PersistedMessage[]): string[] {
   return messages.filter(isMessagePendingSync).map((m) => m.id);
 }
 
@@ -173,7 +173,7 @@ export function extractPendingMessageIds(messages: Message[]): string[] {
  * @param projectId - Project ID
  * @param messages - Messages to mark as pending
  */
-export function markMessagesAsPending(projectId: string, messages: Message[]): void {
+export function markMessagesAsPending(projectId: string, messages: PersistedMessage[]): void {
   const pendingIds = extractPendingMessageIds(messages);
 
   for (const messageId of pendingIds) {
@@ -188,7 +188,7 @@ export function markMessagesAsPending(projectId: string, messages: Message[]): v
  * @param projectId - Project ID
  * @param messages - Messages to scan for pending markers
  */
-export function initializePendingMessagesFromStore(projectId: string, messages: Message[]): void {
+export function initializePendingMessagesFromStore(projectId: string, messages: PersistedMessage[]): void {
   clearPendingMessages(projectId);
   markMessagesAsPending(projectId, messages);
 }

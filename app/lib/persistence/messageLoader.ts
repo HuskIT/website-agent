@@ -5,14 +5,13 @@
  * From specs/001-load-project-messages/plan.md and tasks.md (T006-T009)
  */
 
-import type { Message } from 'ai';
+import type { PersistedMessage, SequencedMessage } from '~/types/message-loading';
 import { createScopedLogger } from '~/utils/logger';
 import type { ProjectMessage } from '~/types/project';
 import type { MessageLoaderOptions, MessageLoadResult, MessageLoadProgress } from '~/types/message-loading';
 import { defaultLoaderOptions } from '~/types/message-loading';
 import { calculateBackoff, isRetryableStatus, sleep } from '~/lib/utils/backoff';
 import { validateMessages } from './messageValidation';
-import type { SequencedMessage } from './messageSort';
 
 const logger = createScopedLogger('MessageLoader');
 
@@ -114,7 +113,7 @@ export async function loadAllMessages(
     maxRetries: config.maxRetries,
   });
 
-  const allMessages: Message[] = [];
+  const allMessages: PersistedMessage[] = [];
   let offset = 0;
   let total = Infinity;
   let retryCount = 0;
@@ -261,9 +260,9 @@ function convertToAISDKMessages(projectMessages: ProjectMessage[]): SequencedMes
   return projectMessages.map((msg) => ({
     id: msg.message_id,
     role: msg.role,
-    content: msg.content as Message['content'], // API returns content matching AI SDK format
+    content: msg.content as PersistedMessage['content'], // API returns content matching AI SDK format
     createdAt: new Date(msg.created_at),
-    annotations: msg.annotations as Message['annotations'], // Preserve annotations for hidden messages
+    annotations: msg.annotations as PersistedMessage['annotations'], // Preserve annotations for hidden messages
     sequence_num: msg.sequence_num, // Preserve sequence_num for proper ordering
   }));
 }

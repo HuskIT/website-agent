@@ -1,4 +1,4 @@
-import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
+import { convertToModelMessages, streamText as _streamText } from 'ai';
 import { MAX_TOKENS, PROVIDER_COMPLETION_LIMITS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, WORK_DIR } from '~/utils/constants';
@@ -7,13 +7,13 @@ import { PromptLibrary } from '~/lib/common/prompt-library';
 import { allowedHTMLElements } from '~/utils/markdown';
 import { LLMManager } from '~/lib/modules/llm/manager';
 import { createScopedLogger } from '~/utils/logger';
-import { createFilesContext, extractPropertiesFromMessage } from './utils';
+import { createFilesContext, extractPropertiesFromMessage, simplifyBoltActions, type LegacyMessage } from './utils';
 import { discussPrompt } from '~/lib/common/prompts/discuss-prompt';
 import type { DesignScheme } from '~/types/design-scheme';
 import type { RestaurantThemeId } from '~/types/restaurant-theme';
 import { getThemePrompt } from '~/theme-prompts/registry';
 
-export type Messages = Message[];
+export type Messages = LegacyMessage[];
 
 export interface StreamingOptions extends Omit<Parameters<typeof _streamText>[0], 'model'> {
   supabaseConnection?: {
@@ -30,8 +30,6 @@ const logger = createScopedLogger('stream-text');
 
 function getCompletionTokenLimit(modelDetails: any): number {
   // 1. If model specifies completion tokens, use that
-  console.log('modelDetails', modelDetails);
-
   if (modelDetails.maxCompletionTokens && modelDetails.maxCompletionTokens > 0) {
     return modelDetails.maxCompletionTokens;
   }
@@ -51,12 +49,13 @@ function sanitizeText(text: string): string {
   let sanitized = text.replace(/<div class=\\"__boltThought__\\">.*?<\/div>/s, '');
   sanitized = sanitized.replace(/<think>.*?<\/think>/s, '');
   sanitized = sanitized.replace(/<boltAction type="file" filePath="package-lock\.json">[\s\S]*?<\/boltAction>/g, '');
+  sanitized = simplifyBoltActions(sanitized);
 
   return sanitized.trim();
 }
 
 export async function streamText(props: {
-  messages: Omit<Message, 'id'>[];
+  messages: Omit<LegacyMessage, 'id'>[];
   env?: Env;
   options?: StreamingOptions;
   apiKeys?: Record<string, string>;
@@ -120,7 +119,39 @@ export async function streamText(props: {
       );
     }
 
+    // Ensure parts array exists (required by convertToModelMessages in AI SDK v6)
+    if (!newMessage.parts) {
+      const text = typeof newMessage.content === 'string' ? newMessage.content : '';
+      newMessage.parts = [{ type: 'text' as const, text }];
+    }
+
     return newMessage;
+  });
+
+  /*
+   * Filter out empty assistant placeholder messages before converting to model format
+   * AI SDK v6 creates these during streaming; LLM providers reject empty assistant messages
+   * Check both 'content' (LegacyMessage field) and 'parts' (UIMessage field) for robustness
+   */
+  processedMessages = processedMessages.filter((msg) => {
+    if (msg.role === 'assistant') {
+      // Check parts for meaningful text content
+      const textFromParts =
+        msg.parts
+          ?.filter((p: any) => p.type === 'text')
+          .map((p: any) => p.text)
+          .join('') || '';
+
+      // Check content string (set by uiMessagesToLegacy)
+      const textFromContent = typeof msg.content === 'string' ? msg.content : '';
+
+      // Message must have non-empty text in either field
+      const combinedText = textFromParts || textFromContent;
+
+      return combinedText.trim().length > 0;
+    }
+
+    return true;
   });
 
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) ?? fallbackProvider;
@@ -328,6 +359,43 @@ ${themePrompt}
     ),
   );
 
+  // Destructure out `prompt` to avoid conflict with `messages` in streamText params
+  const { prompt: _prompt, ...safeOptions } = filteredOptions;
+
+  // Log message summary before conversion (helps debug empty message issues)
+  logger.info(
+    `Messages to LLM (${processedMessages.length}):`,
+    JSON.stringify(
+      processedMessages.map((m, i) => ({
+        index: i,
+        role: m.role,
+        contentLength: typeof m.content === 'string' ? m.content.length : -1,
+        partsCount: m.parts?.length ?? 0,
+        textPartsPreview:
+          m.parts
+            ?.filter((p: any) => p.type === 'text')
+            .map((p: any) => p.text?.substring(0, 30))
+            .join('|') ?? 'no-parts',
+      })),
+    ),
+  );
+
+  /*
+   * Strip 'step-start' parts from messages before convertToModelMessages.
+   * AI SDK v6 inserts step-start parts during multi-step streaming (e.g., tool use).
+   * convertToModelMessages splits assistant messages at step-start boundaries, which can
+   * produce empty assistant model messages that LLM providers reject.
+   */
+  const messagesForConversion = processedMessages.map((msg) => {
+    if (msg.role === 'assistant' && Array.isArray(msg.parts)) {
+      const filteredParts = msg.parts.filter((p: any) => p.type !== 'step-start');
+
+      return { ...msg, parts: filteredParts };
+    }
+
+    return msg;
+  });
+
   const streamParams = {
     model: provider.getModelInstance({
       model: modelDetails.name,
@@ -337,8 +405,8 @@ ${themePrompt}
     }),
     system: chatMode === 'build' ? systemPrompt : discussPrompt(),
     ...tokenParams,
-    messages: convertToCoreMessages(processedMessages as any),
-    ...filteredOptions,
+    messages: await convertToModelMessages(messagesForConversion as any),
+    ...safeOptions,
 
     // Set temperature to 1 for reasoning models (required by OpenAI API)
     ...(isReasoning ? { temperature: 1 } : {}),

@@ -247,7 +247,7 @@ Shared infrastructure that ALL user stories depend on.
 All foundational work complete. User story implementation can begin.
 
 ## Source
-Derived from: plan.md, data-model.md" \
+Derived from: $FEATURE_DIR/plan.md, $FEATURE_DIR/data-model.md" \
   --deps $FEATURE_EPIC_ID --json
 ```
 
@@ -267,7 +267,7 @@ bd create "US1: [Story Title]" -t epic -p 1 \
 [From spec.md - Given/When/Then scenarios]
 
 ## Source
-Derived from: spec.md US1" \
+Derived from: $FEATURE_DIR/spec.md (US1)" \
   --deps $FEATURE_EPIC_ID,$FOUNDATION_EPIC_ID --json
 ```
 
@@ -287,7 +287,7 @@ Final improvements affecting all user stories.
 - Final validation
 
 ## Source
-Derived from: checklists/, quickstart.md" \
+Derived from: $FEATURE_DIR/checklists/, $FEATURE_DIR/quickstart.md" \
   --deps $FEATURE_EPIC_ID --json
 ```
 
@@ -306,7 +306,7 @@ Create base project structure per plan.md
 [Paths from plan.md project structure section]
 
 ## Source
-Derived from: plan.md" \
+Derived from: $FEATURE_DIR/plan.md" \
   --deps $FOUNDATION_EPIC_ID --json
 ```
 
@@ -324,7 +324,7 @@ Implement [Entity] model with attributes and validation
 - app/lib/models/[entity].ts
 
 ## Source
-Derived from: data-model.md" \
+Derived from: $FEATURE_DIR/data-model.md" \
   --deps $US1_EPIC_ID --json
 ```
 
@@ -345,7 +345,7 @@ Implement API endpoint per contract specification
 - app/routes/api.[name].ts
 
 ## Source
-Derived from: contracts/[file]" \
+Derived from: $FEATURE_DIR/contracts/[file]" \
   --deps $US1_EPIC_ID --json
 ```
 

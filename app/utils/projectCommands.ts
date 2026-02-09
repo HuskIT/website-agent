@@ -1,4 +1,4 @@
-import type { Message } from 'ai';
+import type { PersistedMessage } from '~/types/message-loading';
 import { generateId } from './fileUtils';
 
 export interface ProjectCommands {
@@ -107,7 +107,7 @@ export async function detectProjectCommands(files: FileContent[]): Promise<Proje
   return { type: '', setupCommand: '', followupMessage: '' };
 }
 
-export function createCommandsMessage(commands: ProjectCommands): Message | null {
+export function createCommandsMessage(commands: ProjectCommands): PersistedMessage | null {
   if (!commands.setupCommand && !commands.startCommand) {
     return null;
   }

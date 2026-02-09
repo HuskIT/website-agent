@@ -5,15 +5,7 @@
  * From specs/001-load-project-messages/data-model.md
  */
 
-import type { Message } from 'ai';
-
-/**
- * Extended Message interface that includes sequence_num.
- * This is used when messages are loaded from the server with sequence information.
- */
-export interface SequencedMessage extends Message {
-  sequence_num?: number;
-}
+import type { PersistedMessage, SequencedMessage } from '~/types/message-loading';
 
 /**
  * Compare two messages for sorting by sequence number.
@@ -75,7 +67,7 @@ export function sortMessagesBySequence(messages: SequencedMessage[]): SequencedM
  * @param messages - Array of messages to sort
  * @returns New array with messages sorted by createdAt ascending
  */
-export function sortMessagesByTimestamp(messages: Message[]): Message[] {
+export function sortMessagesByTimestamp(messages: PersistedMessage[]): PersistedMessage[] {
   return [...messages].sort((a, b) => {
     const aTime = new Date(a.createdAt ?? 0).getTime();
     const bTime = new Date(b.createdAt ?? 0).getTime();

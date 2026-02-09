@@ -274,8 +274,8 @@ async function llmCallAction({ context, request }: ActionFunctionArgs) {
 
       // End generation with usage data
       generation?.end({
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
+        promptTokens: result.usage?.inputTokens,
+        completionTokens: result.usage?.outputTokens,
         totalTokens: result.usage?.totalTokens,
         latencyMs: performance.now() - startTime,
         output: result.text?.slice(0, 2000),

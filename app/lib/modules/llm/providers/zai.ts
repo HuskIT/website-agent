@@ -1,6 +1,6 @@
 import { BaseProvider } from '~/lib/modules/llm/base-provider';
 import type { ModelInfo } from '~/lib/modules/llm/types';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import type { IProviderSetting } from '~/types/model';
 import { createOpenAI } from '@ai-sdk/openai';
 
@@ -29,7 +29,7 @@ export default class ZAIProvider extends BaseProvider {
     serverEnv: Env;
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
-  }): LanguageModelV1 {
+  }): LanguageModel {
     const { model, serverEnv, apiKeys, providerSettings } = options;
 
     const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
@@ -49,6 +49,6 @@ export default class ZAIProvider extends BaseProvider {
       apiKey,
     });
 
-    return openai(model);
+    return openai.chat(model);
   }
 }
