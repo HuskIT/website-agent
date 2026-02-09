@@ -44,8 +44,21 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Authentication required', code: 'UNAUTHORIZED' }, { status: 401 });
     }
 
-    // Parse and validate request body
-    const body = await request.json();
+    /*
+     * Parse and validate request body
+     * Handle both JSON (regular fetch) and text/plain (navigator.sendBeacon)
+     */
+    const contentType = request.headers.get('Content-Type') || '';
+    let body: unknown;
+
+    if (contentType.includes('application/json')) {
+      body = await request.json();
+    } else {
+      // sendBeacon sends as text/plain
+      const text = await request.text();
+      body = JSON.parse(text);
+    }
+
     const parseResult = StopSandboxRequestSchema.safeParse(body);
 
     if (!parseResult.success) {

@@ -458,8 +458,44 @@ export class ActionRunner {
 
   async #runStartAction(action: ActionState) {
     if (action.type !== 'start') {
-      unreachable('Expected shell action');
+      unreachable('Expected start action');
     }
+
+    // Try to use provider abstraction if available (Vercel Sandbox)
+    const provider = await this.#getProvider();
+
+    // Debug logging for provider routing
+    console.log('[ActionRunner] Start action routing check', {
+      hasProvider: !!provider,
+      providerType: provider?.type,
+      providerStatus: provider?.status,
+      command: action.content.substring(0, 50),
+      timestamp: Date.now(),
+    });
+
+    if (provider && provider.status === 'connected') {
+      console.log(`[ActionRunner] 🚀 Running start command via Vercel Sandbox: ${action.content.substring(0, 50)}...`);
+
+      try {
+        // Parse command for provider execution
+        const { cmd, args } = this.#parseCommand(action.content);
+
+        // Fire and forget for dev server (it runs indefinitely)
+        provider.runCommand(cmd, args).catch((error) => {
+          logger.error('Provider start command failed:', error);
+        });
+
+        // Return immediately (dev server runs in background)
+        return;
+      } catch (error) {
+        logger.warn('Provider start command setup failed, falling back to WebContainer', error);
+
+        // Fall through to WebContainer
+      }
+    }
+
+    // Fallback to WebContainer
+    console.log('[ActionRunner] Falling back to WebContainer for start command');
 
     if (!this.#shellTerminal) {
       unreachable('Shell terminal not found');
@@ -482,7 +518,7 @@ export class ActionRunner {
       throw new ActionCommandError('Failed To Start Application', resp?.output || 'No Output Available');
     }
 
-    return resp;
+    return;
   }
 
   async #runFileAction(action: ActionState) {

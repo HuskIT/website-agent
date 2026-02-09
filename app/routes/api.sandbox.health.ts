@@ -47,6 +47,28 @@ const READY_PATTERNS = [
   '<div id="__next"', // Next.js mount point
 ];
 
+/**
+ * Patterns that indicate JavaScript runtime errors in the preview.
+ * These appear in the HTML when the browser encounters errors, either
+ * as Vite error overlays or in error messages displayed in the DOM.
+ */
+const ERROR_PATTERNS = [
+  'vite-error-overlay', // Vite's error overlay component
+  'ReferenceError', // Undefined variable
+  'TypeError', // Type-related errors
+  'SyntaxError', // Invalid JavaScript syntax
+  'Uncaught', // Uncaught exceptions
+  'Cannot find module', // Module resolution errors
+  'Failed to resolve', // Import/resolution failures
+  'Build failed', // Build-time errors
+  'ENOENT', // File not found errors
+  'Failed to compile', // Compilation errors
+  '[plugin:vite', // Vite plugin errors (CSS, PostCSS, etc.)
+  '[postcss]', // PostCSS errors
+  'Error:', // Generic error marker
+  'Internal server error', // Vite server errors
+];
+
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return json({ ready: false }, { status: 405 });
@@ -86,6 +108,26 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Check for positive dev server indicators
     const hasReadyPattern = READY_PATTERNS.some((pattern) => lowerText.includes(pattern));
+
+    // Check for runtime errors in the HTML
+    const detectedError = ERROR_PATTERNS.find((pattern) => text.includes(pattern));
+
+    if (detectedError) {
+      // Extract a snippet of the error for display (up to 500 chars)
+      const errorIndex = text.indexOf(detectedError);
+      const snippetStart = Math.max(0, errorIndex - 100);
+      const snippetEnd = Math.min(text.length, errorIndex + 400);
+      const snippet = text.slice(snippetStart, snippetEnd).trim();
+
+      return json({
+        ready: false,
+        error: {
+          type: 'runtime',
+          pattern: detectedError,
+          snippet: snippet.length > 500 ? snippet.slice(0, 500) + '...' : snippet,
+        },
+      });
+    }
 
     /*
      * If the response contains framework-specific markers (/@vite/client,

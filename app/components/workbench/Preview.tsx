@@ -100,6 +100,8 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const expoUrl = useStore(expoUrlAtom);
   const [isExpoQrModalOpen, setIsExpoQrModalOpen] = useState(false);
   const refreshSignal = useStore(workbenchStore.vercelPreviewRefreshSignal);
+  const [isReloading, setIsReloading] = useState(false);
+  const scrollPositionRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!activePreview) {
@@ -198,9 +200,29 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: iframeUrl }),
         });
-        const data = (await res.json()) as { ready?: boolean };
+        const data = (await res.json()) as {
+          ready?: boolean;
+          error?: { type: string; pattern: string; snippet: string };
+        };
 
         console.log(`[Preview] Health check #${attempts}:`, data);
+
+        // Check for errors first (even if server is not ready)
+        if (data.error && active) {
+          console.log('[Preview] Build/runtime error detected during health check:', data.error);
+          setServerReady(true); // Load iframe anyway to show error
+
+          // Show alert in chat with "Ask HuskIT" button
+          workbenchStore.actionAlert.set({
+            type: 'error',
+            title: 'Preview Error',
+            description: `Detected ${data.error.pattern} in preview`,
+            content: data.error.snippet,
+            source: 'preview',
+          });
+
+          return; // Stop polling
+        }
 
         if (data.ready && active) {
           console.log('[Preview] Vercel dev server is ready, loading iframe');
@@ -226,6 +248,70 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
       clearTimeout(timer);
     };
   }, [isVercelPreview, iframeUrl]);
+
+  /*
+   * Poll for runtime errors in Vercel sandbox previews (Issue 12).
+   * Once the dev server is ready, periodically check the HTML response
+   * for error patterns (Vite error overlay, Uncaught errors, etc.).
+   * If an error is detected, show an alert in the chat offering to fix it.
+   */
+  useEffect(() => {
+    if (!isVercelPreview || !serverReady || !iframeUrl) {
+      return;
+    }
+
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let errorAlertShown = false;
+
+    const pollForErrors = async () => {
+      try {
+        const res = await fetch('/api/sandbox/health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: iframeUrl }),
+        });
+        const data = (await res.json()) as {
+          ready?: boolean;
+          error?: { type: string; pattern: string; snippet: string };
+        };
+
+        if (data.error && !errorAlertShown && active) {
+          console.log('[Preview] Runtime error detected:', data.error);
+          errorAlertShown = true;
+
+          // Show alert in chat with "Ask HuskIT" button
+          workbenchStore.actionAlert.set({
+            type: 'error',
+            title: 'Preview Error',
+            description: `Detected ${data.error.pattern} in preview`,
+            content: data.error.snippet,
+            source: 'preview',
+          });
+
+          // Stop polling once error is detected and alert shown
+          return;
+        }
+      } catch (error) {
+        // Fetch failed — sandbox may be dead, but don't spam errors
+        console.warn('[Preview] Error polling failed:', error);
+      }
+
+      // Continue polling every 10 seconds
+      if (active) {
+        timer = setTimeout(pollForErrors, 10000);
+      }
+    };
+
+    // Start error polling after 5 seconds (give dev server time to start)
+    timer = setTimeout(pollForErrors, 5000);
+
+    // eslint-disable-next-line consistent-return
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isVercelPreview, serverReady, iframeUrl]);
 
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {
@@ -510,6 +596,13 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
    * When files are successfully synced to Vercel sandbox, trigger a debounced
    * iframe reload so the preview reflects the new content.
    * Vite HMR doesn't work through credentialless iframes, so we manually reload.
+   *
+   * Uses fade transition for better UX:
+   * 1. Fade out iframe (200ms)
+   * 2. Show loading spinner
+   * 3. Reload iframe
+   * 4. Restore scroll position
+   * 5. Fade back in (200ms)
    */
   useEffect(() => {
     if (!isVercelPreview || !serverReady || !iframeRef.current || refreshSignal === 0) {
@@ -518,11 +611,44 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
 
     // Debounce: wait 1 second after last sync event before reloading
     const timer = setTimeout(() => {
-      console.log('[Preview] Reloading iframe after Vercel file sync');
+      const iframe = iframeRef.current;
 
-      if (iframeRef.current) {
-        iframeRef.current.src = iframeRef.current.src;
+      if (!iframe) {
+        return;
       }
+
+      // Capture scroll position before reload
+      try {
+        scrollPositionRef.current = {
+          x: iframe.contentWindow?.scrollX || 0,
+          y: iframe.contentWindow?.scrollY || 0,
+        };
+      } catch {
+        // credentialless iframe may block access, ignore
+      }
+
+      // Start visual transition - fade out
+      setIsReloading(true);
+
+      // Wait for fade out, then reload
+      setTimeout(() => {
+        // Add load listener before changing src
+        const handleLoad = () => {
+          // Restore scroll position after load
+          try {
+            iframe.contentWindow?.scrollTo(scrollPositionRef.current.x, scrollPositionRef.current.y);
+          } catch {
+            // Ignore credentialless restrictions
+          }
+
+          // Fade back in
+          setIsReloading(false);
+          iframe.removeEventListener('load', handleLoad);
+        };
+
+        iframe.addEventListener('load', handleLoad);
+        iframe.src = iframe.src;
+      }, 200); // Match CSS transition duration
     }, 1000);
 
     // eslint-disable-next-line consistent-return
@@ -1439,43 +1565,66 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
                         }}
                       />
 
-                      <iframe
-                        ref={iframeRef}
-                        title="preview"
-                        style={{
-                          border: 'none',
-                          width: isLandscape ? `${selectedWindowSize.height}px` : `${selectedWindowSize.width}px`,
-                          height: isLandscape ? `${selectedWindowSize.width}px` : `${selectedWindowSize.height}px`,
-                          background: 'white',
-                          display: 'block',
-                        }}
-                        src={serverReady ? iframeUrl : undefined}
-                        sandbox={
-                          !isVercelPreview
-                            ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
-                            : undefined
-                        }
-                        allow={!isVercelPreview ? 'cross-origin-isolated' : undefined}
-                      />
+                      {/* Wrap iframe in relative container for loading overlay */}
+                      <div className="relative">
+                        <iframe
+                          ref={iframeRef}
+                          title="preview"
+                          className={`transition-opacity duration-200 ${isReloading ? 'opacity-0' : 'opacity-100'}`}
+                          style={{
+                            border: 'none',
+                            width: isLandscape ? `${selectedWindowSize.height}px` : `${selectedWindowSize.width}px`,
+                            height: isLandscape ? `${selectedWindowSize.width}px` : `${selectedWindowSize.height}px`,
+                            background: 'white',
+                            display: 'block',
+                          }}
+                          src={serverReady ? iframeUrl : undefined}
+                          sandbox={
+                            !isVercelPreview
+                              ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
+                              : undefined
+                          }
+                          allow={!isVercelPreview ? 'cross-origin-isolated' : undefined}
+                        />
+                        {isReloading && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-white">
+                            <div className="flex flex-col items-center gap-3">
+                              <div className="i-svg-spinners:90-ring-with-bg text-bolt-elements-loader-progress text-3xl" />
+                              <span className="text-sm text-bolt-elements-textSecondary">Updating preview...</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <iframe
-                    ref={iframeRef}
-                    title="preview"
-                    className="border-none w-full h-full bg-bolt-elements-background-depth-1"
-                    src={serverReady ? iframeUrl : undefined}
-                    sandbox={
-                      !isVercelPreview
-                        ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
-                        : undefined
-                    }
-                    allow={
-                      !isVercelPreview
-                        ? 'geolocation; ch-ua-full-version-list; cross-origin-isolated; screen-wake-lock; publickey-credentials-get; shared-storage-select-url; ch-ua-arch; bluetooth; compute-pressure; ch-prefers-reduced-transparency; deferred-fetch; usb; ch-save-data; publickey-credentials-create; shared-storage; deferred-fetch-minimal; run-ad-auction; ch-ua-form-factors; ch-downlink; otp-credentials; payment; ch-ua; ch-ua-model; ch-ect; autoplay; camera; private-state-token-issuance; accelerometer; ch-ua-platform-version; idle-detection; private-aggregation; interest-cohort; ch-viewport-height; local-fonts; ch-ua-platform; midi; ch-ua-full-version; xr-spatial-tracking; clipboard-read; gamepad; display-capture; keyboard-map; join-ad-interest-group; ch-width; ch-prefers-reduced-motion; browsing-topics; encrypted-media; gyroscope; serial; ch-rtt; ch-ua-mobile; window-management; unload; ch-dpr; ch-prefers-color-scheme; ch-ua-wow64; attribution-reporting; fullscreen; identity-credentials-get; private-state-token-redemption; hid; ch-ua-bitness; storage-access; sync-xhr; ch-device-memory; ch-viewport-width; picture-in-picture; magnetometer; clipboard-write; microphone'
-                        : undefined
-                    }
-                  />
+                  <div className="relative w-full h-full">
+                    {/* Wrap iframe in relative container for loading overlay */}
+                    <iframe
+                      ref={iframeRef}
+                      title="preview"
+                      className={`border-none w-full h-full bg-bolt-elements-background-depth-1 transition-opacity duration-200 ${isReloading ? 'opacity-0' : 'opacity-100'}`}
+                      src={serverReady ? iframeUrl : undefined}
+                      sandbox={
+                        !isVercelPreview
+                          ? 'allow-scripts allow-forms allow-popups allow-modals allow-storage-access-by-user-activation allow-same-origin'
+                          : undefined
+                      }
+                      allow={
+                        !isVercelPreview
+                          ? 'geolocation; ch-ua-full-version-list; cross-origin-isolated; screen-wake-lock; publickey-credentials-get; shared-storage-select-url; ch-ua-arch; bluetooth; compute-pressure; ch-prefers-reduced-transparency; deferred-fetch; usb; ch-save-data; publickey-credentials-create; shared-storage; deferred-fetch-minimal; run-ad-auction; ch-ua-form-factors; ch-downlink; otp-credentials; payment; ch-ua; ch-ua-model; ch-ect; autoplay; camera; private-state-token-issuance; accelerometer; ch-ua-platform-version; idle-detection; private-aggregation; interest-cohort; ch-viewport-height; local-fonts; ch-ua-platform; midi; ch-ua-full-version; xr-spatial-tracking; clipboard-read; gamepad; display-capture; keyboard-map; join-ad-interest-group; ch-width; ch-prefers-reduced-motion; browsing-topics; encrypted-media; gyroscope; serial; ch-rtt; ch-ua-mobile; window-management; unload; ch-dpr; ch-prefers-color-scheme; ch-ua-wow64; attribution-reporting; fullscreen; identity-credentials-get; private-state-token-redemption; hid; ch-ua-bitness; storage-access; sync-xhr; ch-device-memory; ch-viewport-width; picture-in-picture; magnetometer; clipboard-write; microphone'
+                          : undefined
+                      }
+                    />
+                    {isReloading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-bolt-elements-background-depth-1">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="i-svg-spinners:90-ring-with-bg text-bolt-elements-loader-progress text-3xl" />
+                          <span className="text-sm text-bolt-elements-textSecondary">Updating preview...</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
                 <ScreenshotSelector
                   isSelectionMode={isSelectionMode}

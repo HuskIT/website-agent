@@ -31,6 +31,7 @@
     "prepare": "husky",
     "clean": "node scripts/clean.js",
     "migrate:auth": "tsx scripts/migrate-auth.ts",
+    "test:error-capture": "tsx scripts/test-error-capture.ts",
     "templates:seed": "pnpm exec tsx scripts/templates/seed-registry.ts",
     "templates:clone": "pnpm exec tsx scripts/templates/clone-starters.ts",
     "electron:dev": "node scripts/electron-dev.mjs",

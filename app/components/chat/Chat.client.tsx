@@ -234,7 +234,7 @@ export const ChatImpl = memo(
     const [fakeLoading, setFakeLoading] = useState(false);
     const files = useStore(workbenchStore.files);
     const [designScheme, setDesignScheme] = useState<DesignScheme>(defaultDesignScheme);
-    const actionAlert = useStore(workbenchStore.alert);
+    const actionAlert = useStore(workbenchStore.actionAlert);
     const deployAlert = useStore(workbenchStore.deployAlert);
     const supabaseConn = useStore(supabaseConnection);
     const selectedProject = supabaseConn.stats?.projects?.find(
@@ -502,6 +502,14 @@ export const ChatImpl = memo(
         setMessages([welcomeMessage]);
         setChatStarted(true);
       }
+    }, []);
+
+    // Cleanup: Stop sandbox when navigating away from this project
+    useEffect(() => {
+      return () => {
+        // Disconnect sandbox provider when component unmounts (navigating away)
+        workbenchStore.disconnectProvider(true);
+      };
     }, []);
 
     useEffect(() => {

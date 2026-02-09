@@ -333,42 +333,14 @@ export class WorkbenchStore {
             return;
           }
 
-          // Sandbox is dead — trigger recreation if user is active
-          if (this.#isRecreating) {
-            return;
-          }
-
-          if (!this.#isUserActive()) {
-            logger.info('File sync: sandbox dead but user idle — showing banner');
-            this.actionAlert.set({
-              type: 'warning',
-              title: 'Session Expired',
-              description: 'Your sandbox session expired. Click Restart to continue.',
-              content: '',
-            });
-
-            return;
-          }
-
-          this.#recreationCount++;
-
-          if (this.#recreationCount > 2) {
-            this.actionAlert.set({
-              type: 'warning',
-              title: 'Session Expired',
-              description: 'Your sandbox has expired multiple times. Click Restart to continue.',
-              content: '',
-            });
-            return;
-          }
-
-          logger.warn('File sync detected dead sandbox, triggering recreation', { paths });
-          this.#isRecreating = true;
-          this.#recreateSandbox()
-            .catch((e) => logger.error('Failed to recreate after sync failure', e))
-            .finally(() => {
-              this.#isRecreating = false;
-            });
+          // Sandbox is dead — show notification, user must click Restart
+          logger.info('File sync: sandbox expired — showing notification');
+          this.actionAlert.set({
+            type: 'warning',
+            title: 'Session Expired',
+            description: 'Your preview session has ended. Click Restart to continue.',
+            content: '',
+          });
         },
       });
       this.#fileSyncManager.setProvider(provider);
@@ -569,42 +541,14 @@ export class WorkbenchStore {
                 return;
               }
 
-              // Sandbox is dead — trigger recreation if user is active
-              if (this.#isRecreating) {
-                return;
-              }
-
-              if (!this.#isUserActive()) {
-                logger.info('File sync: sandbox dead but user idle — showing banner');
-                this.actionAlert.set({
-                  type: 'warning',
-                  title: 'Session Expired',
-                  description: 'Your sandbox session expired. Click Restart to continue.',
-                  content: '',
-                });
-
-                return;
-              }
-
-              this.#recreationCount++;
-
-              if (this.#recreationCount > 2) {
-                this.actionAlert.set({
-                  type: 'warning',
-                  title: 'Session Expired',
-                  description: 'Your sandbox has expired multiple times. Click Restart to continue.',
-                  content: '',
-                });
-                return;
-              }
-
-              logger.warn('File sync detected dead sandbox, triggering recreation', { paths });
-              this.#isRecreating = true;
-              this.#recreateSandbox()
-                .catch((e) => logger.error('Failed to recreate after sync failure', e))
-                .finally(() => {
-                  this.#isRecreating = false;
-                });
+              // Sandbox is dead — show notification, user must click Restart
+              logger.info('File sync: sandbox expired — showing notification');
+              this.actionAlert.set({
+                type: 'warning',
+                title: 'Session Expired',
+                description: 'Your preview session has ended. Click Restart to continue.',
+                content: '',
+              });
             },
           });
           this.#fileSyncManager.setProvider(provider);
@@ -837,12 +781,11 @@ export class WorkbenchStore {
             logger.error('Failed to save snapshot before timeout', { error });
           })
           .finally(() => {
-            // Show error alert after snapshot attempt (regardless of success)
+            // Show warning alert after snapshot attempt (regardless of success)
             this.actionAlert.set({
-              type: 'error',
+              type: 'warning',
               title: 'Session Expired',
-              description:
-                'Your sandbox session has expired. Your work has been saved. Please refresh to start a new session.',
+              description: 'Your sandbox session has expired. Your work has been saved. Click Restart to continue.',
               content: '',
             });
           });
@@ -933,6 +876,30 @@ export class WorkbenchStore {
 
       document.removeEventListener('visibilitychange', onVisibility);
       this.#activityTrackingStarted = false;
+    };
+
+    // Stop sandbox when tab closes (using sendBeacon for guaranteed delivery)
+    const onBeforeUnload = () => {
+      if (this.#sandboxProvider?.type === 'vercel' && this.#sandboxProvider.sandboxId) {
+        navigator.sendBeacon(
+          '/api/sandbox/stop',
+          JSON.stringify({
+            projectId: this.#currentProjectId,
+            sandboxId: this.#sandboxProvider.sandboxId,
+            createSnapshot: true,
+          }),
+        );
+      }
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    // Extend cleanup to include beforeunload
+    const originalCleanup = this.#domActivityCleanup;
+
+    this.#domActivityCleanup = () => {
+      originalCleanup?.();
+      window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }
 
@@ -1069,29 +1036,16 @@ export class WorkbenchStore {
         oldSandboxId,
       });
 
-      // 4. Update database with new sandbox ID
-      this.loadingStatus.set('Updating database...');
+      /*
+       * Note: Database is already updated with new sandbox ID by /api/sandbox/create
+       * No need to update again here (avoids race conditions)
+       */
 
-      const updateResponse = await fetch(`/api/projects/${projectId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sandbox_id: newProvider.sandboxId,
-          sandbox_provider: newProvider.type,
-        }),
-      });
-
-      if (!updateResponse.ok) {
-        throw new Error(`Failed to update project with new sandbox ID: ${updateResponse.status}`);
-      }
-
-      logger.info('Database updated with new sandbox ID', { projectId, newSandboxId: newProvider.sandboxId });
-
-      // 5. Restore files from database snapshot
+      // 4. Restore files from database snapshot
       this.loadingStatus.set('Restoring files...');
       await this.restoreFromDatabaseSnapshot();
 
-      // 6. Clear loading status on success
+      // 5. Clear loading status on success
       this.loadingStatus.set(null);
 
       logger.info('Sandbox recreation complete', { projectId, newSandboxId: newProvider.sandboxId });
@@ -1606,41 +1560,10 @@ export class WorkbenchStore {
                 details: errorData.details,
               });
 
-              // If sandbox expired during upload, recreate and restart the entire restore
+              // If sandbox expired during upload, show notification (no auto-recreation)
               if (response.status === 410 || errorData.code === 'SANDBOX_EXPIRED') {
-                // Idle cost protection: don't auto-recreate if user is away
-                if (!this.#isUserActive()) {
-                  logger.info('Sandbox expired during upload but user is idle — not recreating');
-                  throw new Error('Sandbox expired while user is idle');
-                }
-
-                this.#recreationCount++;
-
-                if (this.#recreationCount > 2) {
-                  logger.warn('Too many consecutive recreations during upload, stopping');
-                  throw new Error('Sandbox expired repeatedly — click Refresh to restart');
-                }
-
-                logger.warn('Sandbox expired during file upload, recreating', {
-                  chunkIndex: i,
-                  recreationCount: this.#recreationCount,
-                });
-
-                if (!this.#isRecreating) {
-                  this.#isRecreating = true;
-
-                  try {
-                    await this.#recreateSandbox();
-                  } finally {
-                    this.#isRecreating = false;
-                  }
-                }
-
-                /*
-                 * #recreateSandbox calls restoreFromDatabaseSnapshot internally,
-                 * so we return true here — the restore will continue in the recursive call
-                 */
-                return true;
+                logger.info('Sandbox expired during upload — showing notification');
+                throw new Error('Preview session expired. Click Restart to continue.');
               }
 
               throw new Error(
@@ -1819,46 +1742,22 @@ export class WorkbenchStore {
       /*
        * Fire-and-forget: do NOT await – dev servers run indefinitely.
        * The preview polling in Preview.tsx will detect when the port is ready.
+       * NOTE: Browser console errors (runtime errors) are NOT captured here.
+       * They occur in the iframe and require a different mechanism to capture.
        */
       provider.runCommand('sh', devArgs).catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
 
-        if (is410 && !this.#isRecreating) {
-          // Idle cost protection: don't auto-recreate if user is away
-          if (!this.#isUserActive()) {
-            logger.info('Sandbox expired but user is idle — not recreating');
-            this.actionAlert.set({
-              type: 'warning',
-              title: 'Session Expired',
-              description: 'Your sandbox session expired while you were away. Click Refresh to restart.',
-              content: '',
-            });
-
-            return;
-          }
-
-          this.#recreationCount++;
-
-          if (this.#recreationCount > 2) {
-            logger.warn('Too many consecutive recreations, stopping', { count: this.#recreationCount });
-            this.actionAlert.set({
-              type: 'warning',
-              title: 'Session Expired',
-              description: 'Your sandbox has expired multiple times. Click Refresh to restart.',
-              content: '',
-            });
-
-            return;
-          }
-
-          logger.warn('Dev server sandbox expired, triggering recreation', { count: this.#recreationCount });
-          this.#isRecreating = true;
-          this.#recreateSandbox()
-            .catch((e) => logger.error('Failed to recreate after dev server expiry', e))
-            .finally(() => {
-              this.#isRecreating = false;
-            });
+        if (is410) {
+          // Sandbox expired — show notification, user must click Restart (no auto-recreation)
+          logger.info('Dev server: sandbox expired — showing notification');
+          this.actionAlert.set({
+            type: 'warning',
+            title: 'Session Expired',
+            description: 'Your preview session has ended. Click Restart to continue.',
+            content: '',
+          });
         } else if (!is410) {
           logger.error('Dev server command failed unexpectedly', { error: msg });
         }
