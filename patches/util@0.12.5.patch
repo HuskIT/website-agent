@@ -1,0 +1,21 @@
+diff --git a/package.json b/package.json
+index 2099ec02a63b901d88d26b737c56bb12a65350d7..69d20247789aff724f1ccae74d3e074e7be0b8ce 100644
+--- a/package.json
++++ b/package.json
+@@ -28,7 +28,8 @@
+   },
+   "files": [
+     "util.js",
+-    "support"
++    "support",
++    "types.js"
+   ],
+   "homepage": "https://github.com/browserify/node-util",
+   "keywords": [
+diff --git a/types.js b/types.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..565a5595ea04ca0257090c73990484935877b9a0
+--- /dev/null
++++ b/types.js
+@@ -0,0 +1 @@
++module.exports = require('./support/types');

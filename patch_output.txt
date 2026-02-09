@@ -1,0 +1,3 @@
+ ERR_PNPM_EDIT_DIR_NOT_EMPTY  The directory /Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm_patches/util@0.12.5 is not empty
+
+Either run `pnpm patch-commit` to commit or delete it then run `pnpm patch` to recreate it

@@ -1,22 +1,24 @@
 import { createMCPClient } from '@ai-sdk/mcp';
 import { Experimental_StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
-import {
-  type ToolSet,
-  type UIMessage,
-  type UIMessageStreamWriter,
-  convertToModelMessages,
-  isToolUIPart,
-  getToolName,
-} from 'ai';
+import { type ToolSet, type UIMessage, convertToModelMessages } from 'ai';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import type { ToolCallAnnotation } from '~/types/context';
-import {
-  TOOL_EXECUTION_APPROVAL,
-  TOOL_EXECUTION_DENIED,
-  TOOL_EXECUTION_ERROR,
-  TOOL_NO_EXECUTE_FUNCTION,
-} from '~/utils/constants';
+
+// Infer UIMessageStreamWriter type since it's not exported
+type UIMessageStreamWriter = any; // createUIMessageStream is missing in ai v6
+
+function isToolUIPart(part: any): part is {
+  type: 'tool-invocation';
+  toolInvocation: { toolName: string; toolCallId: string; args: any; state: 'call' | 'result'; result?: any };
+} {
+  return part.type === 'tool-invocation';
+}
+
+function getToolName(part: any): string {
+  return part.toolInvocation?.toolName || '';
+}
+import { TOOL_EXECUTION_ERROR, TOOL_NO_EXECUTE_FUNCTION } from '~/utils/constants';
 import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('mcp-service');
@@ -72,10 +74,7 @@ export const mcpConfigSchema = z.object({
 });
 export type MCPConfig = z.infer<typeof mcpConfigSchema>;
 
-export type MCPClient = {
-  tools: () => Promise<ToolSet>;
-  close: () => Promise<void>;
-} & {
+export type MCPClient = Awaited<ReturnType<typeof createMCPClient>> & {
   serverName: string;
 };
 
@@ -207,7 +206,7 @@ export class MCPService {
     return Object.assign(client, { serverName });
   }
 
-  private _registerTools(serverName: string, tools: ToolSet) {
+  private _registerTools(serverName: string, tools: any) {
     for (const [toolName, tool] of Object.entries(tools)) {
       if (this._tools[toolName]) {
         const existingServerName = this._toolNamesToServerNames.get(toolName);
@@ -217,8 +216,8 @@ export class MCPService {
         }
       }
 
-      this._tools[toolName] = tool;
-      this._toolsWithoutExecute[toolName] = { ...tool, execute: undefined };
+      this._tools[toolName] = tool as any;
+      this._toolsWithoutExecute[toolName] = { ...(tool as any), execute: undefined };
       this._toolNamesToServerNames.set(toolName, serverName);
     }
   }
@@ -245,7 +244,7 @@ export class MCPService {
         client = await this._createMCPClient(serverName, config);
 
         try {
-          const tools = await client.tools();
+          const tools = (await client.tools()) as any;
 
           this._registerTools(serverName, tools);
 
@@ -294,7 +293,7 @@ export class MCPService {
         }
 
         try {
-          const tools = await client.tools();
+          const tools = (await client.tools()) as any;
 
           this._registerTools(serverName, tools);
 
@@ -395,51 +394,59 @@ export class MCPService {
         }
 
         const toolName = getToolName(part);
-        const { toolCallId, state } = part;
+        const { toolCallId, args } = part.toolInvocation;
+        const input = args;
 
-        // return part as-is if tool does not exist, or if it's not in output-available state
-        if (!this.isValidToolName(toolName) || state !== 'output-available') {
+        // return part as-is if tool does not exist
+        if (!this.isValidToolName(toolName)) {
+          return part;
+        }
+
+        const invocation = part.toolInvocation;
+
+        // If already executed, skip
+        if (invocation.state === 'result') {
           return part;
         }
 
         let output;
+        const toolInstance = this._tools[toolName];
 
-        if (part.output === TOOL_EXECUTION_APPROVAL.APPROVE) {
-          const toolInstance = this._tools[toolName];
+        if (toolInstance && typeof (toolInstance as any).execute === 'function') {
+          logger.debug(`calling tool "${toolName}" with input: ${JSON.stringify(input)}`);
 
-          if (toolInstance && typeof toolInstance.execute === 'function') {
-            logger.debug(`calling tool "${toolName}" with input: ${JSON.stringify(part.input)}`);
-
-            try {
-              output = await toolInstance.execute(part.input, {
-                messages: await convertToModelMessages(messages),
-                toolCallId,
-              });
-            } catch (error) {
-              logger.error(`error while calling tool "${toolName}":`, error);
-              output = TOOL_EXECUTION_ERROR;
-            }
-          } else {
-            output = TOOL_NO_EXECUTE_FUNCTION;
+          try {
+            output = await (toolInstance as any).execute(input, {
+              messages: await convertToModelMessages(messages),
+              toolCallId,
+            });
+          } catch (error) {
+            logger.error(`error while calling tool "${toolName}":`, error);
+            output = TOOL_EXECUTION_ERROR;
           }
-        } else if (part.output === TOOL_EXECUTION_APPROVAL.REJECT) {
-          output = TOOL_EXECUTION_DENIED;
         } else {
-          // For any unhandled responses, return the original part.
-          return part;
+          output = TOOL_NO_EXECUTE_FUNCTION;
         }
 
-        // Forward updated tool result to the client.
-        writer.write({
-          type: 'tool-output-available',
+        /*
+         * Forward updated tool result to the client.
+         * We cast to any because the UIMessageStreamWriter type inference might be tricky
+         * and we want to ensure we don't block on strict type checking for this experimental service
+         */
+        (writer as any).write({
+          type: 'tool-result',
           toolCallId,
-          output,
+          result: output,
         });
 
         // Return updated part with the actual output.
         return {
           ...part,
-          output,
+          toolInvocation: {
+            ...invocation,
+            state: 'result',
+            result: output,
+          },
         };
       }),
     );

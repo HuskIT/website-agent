@@ -1,6 +1,7 @@
 import { cloudflareDevProxyVitePlugin as remixCloudflareDevProxy, vitePlugin as remixVitePlugin } from '@remix-run/dev';
 import UnoCSS from 'unocss/vite';
 import { defineConfig, type ViteDevServer } from 'vite';
+
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -258,7 +259,7 @@ export default defineConfig((config) => {
     ],
     ssr: {
       // Don't apply browser polyfills in SSR - use native Node.js modules
-      external: ['path', 'fs', 'fs/promises'],
+      external: ['path', 'fs', 'fs/promises', 'util', 'util/types', 'undici'],
     },
     css: {
       preprocessorOptions: {
