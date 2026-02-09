@@ -7,7 +7,12 @@
 import { json, type ActionFunctionArgs } from '@remix-run/node';
 import { Sandbox } from '@vercel/sandbox';
 import { getSession } from '~/lib/auth/session.server';
-import { getProjectById, updateProject } from '~/lib/services/projects.server';
+import {
+  getProjectById,
+  updateProject,
+  getLatestProjectSnapshot,
+  updateProjectSnapshot,
+} from '~/lib/services/projects.server';
 import { StopSandboxRequestSchema, type StopSandboxResponse } from '~/lib/sandbox/schemas';
 import { createScopedLogger } from '~/utils/logger';
 
@@ -107,6 +112,38 @@ export async function action({ request }: ActionFunctionArgs) {
           const snap = await sandbox.snapshot();
           snapshotId = snap.snapshotId;
           logger.info('Snapshot created', { projectId, sandboxId, snapshotId });
+
+          /*
+           * Save Vercel snapshot ID to database for fast restore on next session
+           * This enables restoring from snapshot instead of full file upload + npm install
+           */
+          try {
+            console.log('💾 Saving Vercel snapshot ID to database:', { projectId, snapshotId });
+
+            const latestSnapshot = await getLatestProjectSnapshot(projectId, session.user.id);
+
+            if (latestSnapshot) {
+              console.log('💾 Found latest snapshot:', { snapshotId: latestSnapshot.id, projectId });
+              await updateProjectSnapshot(latestSnapshot.id, { vercel_snapshot_id: snapshotId }, session.user.id);
+              logger.info('Vercel snapshot ID saved to database', { projectId, snapshotId });
+              console.log('✅ Vercel snapshot ID saved successfully:', { projectId, snapshotId });
+            } else {
+              console.warn('⚠️ No project snapshot found to save Vercel snapshot ID', { projectId, snapshotId });
+              logger.warn('No project snapshot found to save Vercel snapshot ID', { projectId, snapshotId });
+            }
+          } catch (dbError) {
+            // Non-fatal: snapshot was created but DB update failed
+            console.error('❌ Failed to save Vercel snapshot ID to database:', {
+              projectId,
+              snapshotId,
+              error: dbError,
+            });
+            logger.warn('Failed to save Vercel snapshot ID to database', {
+              projectId,
+              snapshotId,
+              error: dbError,
+            });
+          }
         } catch (snapErr) {
           // Snapshot failed – fall through to explicit stop
           logger.warn('Snapshot before stop failed, calling stop()', { projectId, sandboxId, error: snapErr });
@@ -117,11 +154,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
-    // Clear sandbox reference from project
+    // Clear sandbox reference from project (but keep snapshot reference)
     await updateProject(projectId, session.user.id, {
       sandbox_id: null,
       sandbox_provider: null,
       sandbox_expires_at: null,
+
+      // Note: vercel_snapshot_id is stored in project_snapshots table, not projects table
     });
 
     logger.info('Sandbox stopped', { projectId, sandboxId, snapshotId });
