@@ -256,6 +256,7 @@ export default defineConfig((config) => {
       'OLLAMA_API_BASE_URL',
       'LMSTUDIO_API_BASE_URL',
       'TOGETHER_API_BASE_URL',
+      'LANGFUSE_',
     ],
     ssr: {
       // Don't apply browser polyfills in SSR - use native Node.js modules
