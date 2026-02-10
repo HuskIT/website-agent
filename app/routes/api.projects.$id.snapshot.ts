@@ -8,7 +8,12 @@
 
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/node';
 import { auth } from '~/lib/auth/auth.server';
-import { getSnapshotByProjectId, saveSnapshot } from '~/lib/services/projects.server';
+import {
+  getSnapshotByProjectId,
+  saveSnapshot,
+  getLatestProjectSnapshot,
+  updateProjectSnapshot,
+} from '~/lib/services/projects.server';
 import { createScopedLogger } from '~/utils/logger';
 import { z } from 'zod';
 
@@ -32,6 +37,12 @@ const folderSchema = z.object({
 // Request validation schemas
 const saveSnapshotSchema = z.object({
   files: z.record(z.union([fileSchema, folderSchema])), // FileMap structure
+  summary: z.string().optional(),
+});
+
+// Schema for PATCH request (updating Vercel snapshot ID)
+const updateSnapshotSchema = z.object({
+  vercel_snapshot_id: z.string().optional(),
   summary: z.string().optional(),
 });
 
@@ -63,13 +74,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     logger.info('Fetching snapshot', { projectId, userId });
+    console.log('📸 API: Fetching snapshot for project:', projectId);
 
     const snapshot = await getSnapshotByProjectId(projectId, userId);
 
     if (!snapshot) {
       // Return 404 when no snapshot exists
+      console.log('📸 API: No snapshot found for project:', projectId);
       return json({ error: 'Snapshot not found' }, { status: 404 });
     }
+
+    console.log('📸 API: Snapshot retrieved:', {
+      projectId,
+      snapshotId: snapshot.id,
+      hasVercelSnapshotId: !!snapshot.vercel_snapshot_id,
+      vercelSnapshotId: snapshot.vercel_snapshot_id,
+    });
 
     logger.info('Snapshot retrieved', {
       projectId,
@@ -130,6 +150,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!projectId) {
       return json({ error: 'Project ID is required' }, { status: 400 });
+    }
+
+    if (request.method === 'PATCH') {
+      // Handle PATCH: Update snapshot metadata (e.g., Vercel snapshot ID)
+      return handlePatch(request, projectId, userId);
     }
 
     if (request.method !== 'PUT') {
@@ -210,6 +235,83 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json(
       {
         error: 'Failed to save snapshot',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * Handle PATCH request to update snapshot metadata
+ * Used primarily to save Vercel snapshot ID after sandbox shutdown
+ */
+async function handlePatch(request: Request, projectId: string, userId: string) {
+  try {
+    const body = await request.json();
+    const validationResult = updateSnapshotSchema.safeParse(body);
+
+    if (!validationResult.success) {
+      return json(
+        {
+          error: 'Invalid request body',
+          details: validationResult.error.errors,
+        },
+        { status: 400 },
+      );
+    }
+
+    const { vercel_snapshot_id: vercelSnapshotId, summary } = validationResult.data;
+
+    // Get the latest snapshot for this project
+    const latestSnapshot = await getLatestProjectSnapshot(projectId, userId);
+
+    if (!latestSnapshot) {
+      return json({ error: 'No snapshot found for this project' }, { status: 404 });
+    }
+
+    // Prepare updates
+    const updates: Partial<{ vercel_snapshot_id: string; summary: string }> = {};
+
+    if (vercelSnapshotId !== undefined) {
+      updates.vercel_snapshot_id = vercelSnapshotId;
+    }
+
+    if (summary !== undefined) {
+      updates.summary = summary;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
+    logger.info('Updating snapshot metadata', {
+      projectId,
+      snapshotId: latestSnapshot.id,
+      updates: Object.keys(updates),
+    });
+
+    await updateProjectSnapshot(latestSnapshot.id, updates, userId);
+
+    logger.info('Snapshot metadata updated', {
+      projectId,
+      snapshotId: latestSnapshot.id,
+    });
+
+    return json({
+      success: true,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error('Failed to update snapshot', { error: String(error), projectId });
+
+    if (error instanceof Error && error.message.includes('not found')) {
+      return json({ error: 'Snapshot not found' }, { status: 404 });
+    }
+
+    return json(
+      {
+        error: 'Failed to update snapshot',
         message: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 },

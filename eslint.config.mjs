@@ -4,7 +4,19 @@ import { getNamingConventionRule, tsFileExtensions } from '@blitz/eslint-plugin/
 
 export default [
   {
-    ignores: ['**/dist', '**/node_modules', '**/.wrangler', '**/bolt/build', '**/.history'],
+    ignores: [
+      '**/node_modules',
+      '**/dist',
+      '**/dist-ssr',
+      '**/build',
+      '**/coverage',
+      '**/.wrangler',
+      '**/.history',
+      '**/bolt/build',
+      '**/functions/build',
+      '**/supabase/.temp',
+      '**/*.snap',
+    ],
   },
   ...blitzPlugin.configs.recommended(),
   {

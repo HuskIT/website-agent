@@ -485,6 +485,168 @@ export class WorkbenchStore {
     this.#currentProjectId = projectId;
     this.#currentUserId = userId || 'anonymous';
 
+    /*
+     * PHASE 2: Check for Vercel snapshot BEFORE trying to reconnect
+     * If a Vercel snapshot exists, restore from it instead of reconnecting
+     * This is much faster (5-10s vs 70-100s) because node_modules are already installed
+     */
+    console.log('🔥🔥🔥 Snapshot check condition:', {
+      providerType,
+      userId,
+      condition: providerType === 'vercel' && !!userId,
+    });
+
+    if (providerType === 'vercel' && userId) {
+      try {
+        logger.info('Checking for Vercel snapshot before reconnect', { projectId, userId });
+        console.log('🚀 Checking for Vercel snapshot before reconnect');
+
+        // Fetch latest snapshot via API (client-side can't access server-only modules)
+        console.log('🔥🔥🔥 Fetching snapshot from API:', `/api/projects/${projectId}/snapshot`);
+
+        const snapshotResponse = await fetch(`/api/projects/${projectId}/snapshot`);
+        console.log('🔥🔥🔥 Snapshot API response:', {
+          status: snapshotResponse.status,
+          ok: snapshotResponse.ok,
+        });
+
+        if (!snapshotResponse.ok) {
+          console.log('ℹ️ No snapshot found, will try reconnect');
+        } else {
+          const latestSnapshot = (await snapshotResponse.json()) as {
+            id: string;
+            vercel_snapshot_id?: string | null;
+            files?: Record<string, any>;
+          };
+          console.log('🔥🔥🔥 Snapshot data received:', {
+            id: latestSnapshot.id,
+            hasVercelSnapshotId: !!latestSnapshot.vercel_snapshot_id,
+            vercelSnapshotId: latestSnapshot.vercel_snapshot_id,
+          });
+
+          if (latestSnapshot?.vercel_snapshot_id) {
+            logger.info('Found Vercel snapshot, attempting restore', {
+              projectId,
+              vercelSnapshotId: latestSnapshot.vercel_snapshot_id,
+            });
+            console.log('🚀 Found Vercel snapshot:', latestSnapshot.vercel_snapshot_id);
+
+            this.loadingStatus.set('Restoring from snapshot...');
+
+            const response = await fetch(`/api/sandbox/snapshot/${latestSnapshot.vercel_snapshot_id}/restore`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                projectId,
+                useVercelSnapshot: true,
+              }),
+            });
+
+            if (response.ok) {
+              const data = (await response.json()) as {
+                success: boolean;
+                sandboxId: string;
+                previewUrls: Record<number, string>;
+              };
+
+              logger.info('Successfully restored from Vercel snapshot', {
+                projectId,
+                newSandboxId: data.sandboxId,
+              });
+              console.log('🚀 Successfully restored from Vercel snapshot:', data.sandboxId);
+
+              // Create provider for the new sandbox
+              const provider = await createSandboxProvider(
+                providerType,
+                {
+                  projectId,
+                  userId,
+                  snapshotId: latestSnapshot.vercel_snapshot_id,
+                  workdir: '/home/project',
+                  timeout: 5 * 60 * 1000,
+                  ports: [3000, 5173],
+                  runtime: 'node22',
+                },
+                { skipConnect: false }, // Connect normally
+              );
+
+              this.#sandboxProvider = provider;
+
+              // Set up FileSyncManager
+              this.#fileSyncManager = new FileSyncManager({
+                maxBatchSize: 50,
+                debounceMs: 300,
+                onSyncSuccess: (_paths) => {
+                  this.vercelPreviewRefreshSignal.set(Date.now());
+                },
+                onSyncFailure: (paths, error) => {
+                  const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
+
+                  if (!is410) {
+                    logger.warn('File sync failed (non-sandbox error)', { paths, error });
+                    return;
+                  }
+
+                  this.actionAlert.set({
+                    type: 'warning',
+                    title: 'Session Expired',
+                    description: 'Your preview session has ended. Click Restart to continue.',
+                    content: '',
+                  });
+                },
+              });
+              this.#fileSyncManager.setProvider(provider);
+              this.#filesStore.setFileSyncManager(this.#fileSyncManager);
+
+              // Register preview URLs
+              for (const [port, url] of Object.entries(data.previewUrls)) {
+                this.#previewsStore.registerPreview(parseInt(port, 10), url, 'vercel');
+              }
+
+              // Set up timeout management
+              this._setupTimeoutManager(provider, projectId, userId);
+
+              // Load editor files from Supabase (fast, no upload to sandbox needed)
+              await this.#loadSnapshotIntoFileStore();
+
+              // Start DOM activity tracking
+              this.#startUserActivityTracking();
+
+              // Auto-start dev server (packages already installed!)
+              if (latestSnapshot.files) {
+                await this.#autoStartDevServer(
+                  Object.fromEntries(
+                    Object.entries(latestSnapshot.files).filter(([_, f]) => f?.type === 'file') as [
+                      string,
+                      { content: string; isBinary: boolean },
+                    ][],
+                  ),
+                );
+              }
+
+              this.loadingStatus.set(null);
+
+              return { success: true, provider, restored: true };
+            } else {
+              // Snapshot restore failed, fall through to reconnect
+              logger.warn('Vercel snapshot restore failed, falling back to reconnect', {
+                projectId,
+                status: response.status,
+              });
+              console.log('⚠️ Vercel snapshot restore failed, falling back to reconnect');
+            }
+          }
+        }
+      } catch (error) {
+        // Snapshot check/restore failed, fall through to reconnect
+        logger.warn('Error checking/restoring Vercel snapshot, falling back to reconnect', {
+          projectId,
+          error,
+        });
+        console.log('⚠️ Error checking Vercel snapshot:', error);
+      }
+    }
+
     // If we have a sandboxId and it's a Vercel provider, try to reconnect
     if (sandboxId && providerType === 'vercel') {
       try {
