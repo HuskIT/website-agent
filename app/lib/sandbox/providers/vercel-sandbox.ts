@@ -28,6 +28,9 @@ import type {
   RestoreSnapshotResponse,
   CommandSSEEvent,
 } from '~/lib/sandbox/schemas';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('VercelSandboxProvider');
 
 type StatusCallback = (status: SandboxStatus) => void;
 type PreviewCallback = (port: number, url: string) => void;
@@ -143,7 +146,7 @@ export class VercelSandboxProvider implements SandboxProvider {
         }),
       });
     } catch (error) {
-      console.error('Error stopping sandbox:', error);
+      logger.error('Error stopping sandbox:', error);
     } finally {
       this._cleanup();
       this._setStatus('disconnected');
@@ -199,7 +202,7 @@ export class VercelSandboxProvider implements SandboxProvider {
 
       return true;
     } catch (error) {
-      console.error('Error reconnecting to sandbox:', error);
+      logger.error('Error reconnecting to sandbox:', error);
       this._setStatus('disconnected');
 
       return false;
@@ -358,12 +361,7 @@ export class VercelSandboxProvider implements SandboxProvider {
       throw new Error('Sandbox not connected');
     }
 
-    console.log('[VercelProvider] runCommand called:', {
-      cmd,
-      args,
-      sandboxId: this._sandboxId,
-      projectId: this._config.projectId,
-    });
+    logger.debug('runCommand called', { cmd, args });
 
     let stdout = '';
     let stderr = '';
@@ -753,7 +751,7 @@ export class VercelSandboxProvider implements SandboxProvider {
           this._cleanup();
         }
       } catch (error) {
-        console.error('Error checking sandbox status:', error);
+        logger.error('Error checking sandbox status:', error);
       }
     }, 30000); // Check every 30 seconds
   }
