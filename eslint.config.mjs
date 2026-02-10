@@ -4,7 +4,19 @@ import { getNamingConventionRule, tsFileExtensions } from '@blitz/eslint-plugin/
 
 export default [
   {
-    ignores: ['**/dist', '**/node_modules', '**/.wrangler', '**/bolt/build', '**/.history'],
+    ignores: [
+      '**/node_modules',
+      '**/dist',
+      '**/dist-ssr',
+      '**/build',
+      '**/coverage',
+      '**/.wrangler',
+      '**/.history',
+      '**/bolt/build',
+      '**/functions/build',
+      '**/supabase/.temp',
+      '**/*.snap',
+    ],
   },
   ...blitzPlugin.configs.recommended(),
   {
@@ -23,6 +35,35 @@ export default [
       'no-eval': ['error'],
       'linebreak-style': ['error', 'unix'],
       'arrow-spacing': ['error', { before: true, after: true }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      '@typescript-eslint/naming-convention': [
+        'error',
+        {
+          selector: 'variable',
+          format: ['camelCase', 'UPPER_CASE', 'PascalCase'],
+          leadingUnderscore: 'allow',
+          filter: {
+            regex: '^__',
+            match: false,
+          },
+        },
+        {
+          selector: 'function',
+          format: ['camelCase', 'PascalCase'],
+          leadingUnderscore: 'allow',
+        },
+        {
+          selector: 'typeLike',
+          format: ['PascalCase'],
+        },
+      ],
     },
   },
   {

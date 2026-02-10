@@ -116,6 +116,9 @@ async function handlePatch(projectId: string, userId: string, request: Request) 
     name?: unknown;
     description?: unknown;
     status?: unknown;
+    sandbox_id?: unknown;
+    sandbox_provider?: unknown;
+    sandbox_expires_at?: unknown;
   };
 
   // Validate update fields
@@ -159,6 +162,28 @@ async function handlePatch(projectId: string, userId: string, request: Request) 
     }
 
     updates.status = body.status as ProjectStatus;
+  }
+
+  if (body.sandbox_id !== undefined) {
+    if (body.sandbox_id === null || typeof body.sandbox_id === 'string') {
+      updates.sandbox_id = body.sandbox_id;
+    }
+  }
+
+  if (body.sandbox_provider !== undefined) {
+    if (
+      body.sandbox_provider === null ||
+      body.sandbox_provider === 'webcontainer' ||
+      body.sandbox_provider === 'vercel'
+    ) {
+      updates.sandbox_provider = body.sandbox_provider;
+    }
+  }
+
+  if (body.sandbox_expires_at !== undefined) {
+    if (body.sandbox_expires_at === null || typeof body.sandbox_expires_at === 'string') {
+      updates.sandbox_expires_at = body.sandbox_expires_at as any;
+    }
   }
 
   if (Object.keys(updates).length === 0) {

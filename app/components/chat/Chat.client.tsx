@@ -8,6 +8,7 @@ import { useMessageParser, usePromptEnhancer, useShortcuts } from '~/lib/hooks';
 import { description, useChatHistory } from '~/lib/persistence';
 import { chatStore } from '~/lib/stores/chat';
 import { workbenchStore } from '~/lib/stores/workbench';
+
 import { getThemeByTemplateName } from '~/theme-prompts/registry';
 import type { RestaurantThemeId } from '~/types/restaurant-theme';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROMPT_COOKIE_KEY, PROVIDER_LIST } from '~/utils/constants';
@@ -233,7 +234,7 @@ export const ChatImpl = memo(
     const [fakeLoading, setFakeLoading] = useState(false);
     const files = useStore(workbenchStore.files);
     const [designScheme, setDesignScheme] = useState<DesignScheme>(defaultDesignScheme);
-    const actionAlert = useStore(workbenchStore.alert);
+    const actionAlert = useStore(workbenchStore.actionAlert);
     const deployAlert = useStore(workbenchStore.deployAlert);
     const supabaseConn = useStore(supabaseConnection);
     const selectedProject = supabaseConn.stats?.projects?.find(
@@ -501,6 +502,14 @@ export const ChatImpl = memo(
         setMessages([welcomeMessage]);
         setChatStarted(true);
       }
+    }, []);
+
+    // Cleanup: Stop sandbox when navigating away from this project
+    useEffect(() => {
+      return () => {
+        // Disconnect sandbox provider when component unmounts (navigating away)
+        workbenchStore.disconnectProvider(true);
+      };
     }, []);
 
     useEffect(() => {

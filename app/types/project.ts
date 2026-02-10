@@ -21,6 +21,13 @@ export interface Project {
   status: ProjectStatus;
   url_id: string | null;
   business_profile?: BusinessProfile | null; // Crawler data stored directly on projects table
+  /*
+   * Sandbox provider fields (from 001-sandbox-providers feature)
+   * Database columns use snake_case
+   */
+  sandbox_id?: string | null;
+  sandbox_provider?: 'webcontainer' | 'vercel' | null;
+  sandbox_expires_at?: string | null; // ISO timestamp
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +48,9 @@ export interface ProjectSnapshot {
   project_id: string;
   files: FileMap;
   summary: string | null;
+
+  // Vercel Sandbox snapshot ID for fast restore (from 001-sandbox-providers feature)
+  vercel_snapshot_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +100,14 @@ export interface UpdateProjectInput {
   name?: string;
   description?: string;
   status?: ProjectStatus;
+
+  /*
+   * Sandbox provider fields (from 001-sandbox-providers feature)
+   * Note: Use snake_case for database columns
+   */
+  sandbox_id?: string | null;
+  sandbox_provider?: 'webcontainer' | 'vercel' | null;
+  sandbox_expires_at?: Date | null;
 }
 
 export interface ProjectSummary {

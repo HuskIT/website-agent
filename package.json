@@ -31,6 +31,7 @@
     "prepare": "husky",
     "clean": "node scripts/clean.js",
     "migrate:auth": "tsx scripts/migrate-auth.ts",
+    "test:error-capture": "tsx scripts/test-error-capture.ts",
     "templates:seed": "pnpm exec tsx scripts/templates/seed-registry.ts",
     "templates:clone": "pnpm exec tsx scripts/templates/clone-starters.ts",
     "electron:dev": "node scripts/electron-dev.mjs",
@@ -107,6 +108,7 @@
     "@types/react-beautiful-dnd": "^13.1.8",
     "@uiw/codemirror-theme-vscode": "^4.23.6",
     "@unocss/reset": "^0.61.9",
+    "@vercel/sandbox": "^1.4.1",
     "@webcontainer/api": "1.6.1-internal.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
@@ -191,6 +193,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/react-window": "^1.8.8",
+    "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
@@ -224,5 +227,10 @@
   "resolutions": {
     "@typescript-eslint/utils": "^8.0.0-alpha.30"
   },
-  "packageManager": "pnpm@9.14.4"
+  "packageManager": "pnpm@9.14.4",
+  "pnpm": {
+    "patchedDependencies": {
+      "util@0.12.5": "patches/util@0.12.5.patch"
+    }
+  }
 }

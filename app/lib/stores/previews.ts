@@ -12,6 +12,7 @@ export interface PreviewInfo {
   port: number;
   ready: boolean;
   baseUrl: string;
+  provider?: 'webcontainer' | 'vercel';
 }
 
 // Create a broadcast channel for preview updates
@@ -208,10 +209,69 @@ export class PreviewsStore {
     });
   }
 
-  // Helper to extract preview ID from URL
+  /*
+   * Helper to extract preview ID from URL
+   * Supports both WebContainer (.local-credentialless.webcontainer-api.io) and Vercel (.vercel.run) URLs
+   */
   getPreviewId(url: string): string | null {
-    const match = url.match(/^https?:\/\/([^.]+)\.local-credentialless\.webcontainer-api\.io/);
-    return match ? match[1] : null;
+    // WebContainer URLs
+    const webContainerMatch = url.match(/^https?:\/\/([^.]+)\.local-credentialless\.webcontainer-api\.io/);
+
+    if (webContainerMatch) {
+      return webContainerMatch[1];
+    }
+
+    // Vercel Sandbox URLs - extract subdomain as ID
+    const vercelMatch = url.match(/^https?:\/\/([^.]+)\.vercel\.run/);
+
+    if (vercelMatch) {
+      return `vercel-${vercelMatch[1]}`;
+    }
+
+    return null;
+  }
+
+  // Register a preview URL from a cloud provider (Vercel Sandbox)
+  registerPreview(port: number, url: string, provider: 'webcontainer' | 'vercel' = 'webcontainer'): void {
+    let previewInfo = this.#availablePreviews.get(port);
+    const previews = this.previews.get();
+
+    if (!previewInfo) {
+      previewInfo = { port, ready: true, baseUrl: url, provider };
+      this.#availablePreviews.set(port, previewInfo);
+      previews.push(previewInfo);
+    } else {
+      previewInfo.ready = true;
+      previewInfo.baseUrl = url;
+      previewInfo.provider = provider;
+    }
+
+    this.previews.set([...previews]);
+    this.broadcastUpdate(url);
+
+    // Initial storage sync when preview is ready
+    this._broadcastStorageSync();
+  }
+
+  // Unregister a preview (when sandbox disconnects)
+  unregisterPreview(port: number): void {
+    const previewInfo = this.#availablePreviews.get(port);
+
+    if (previewInfo) {
+      this.#availablePreviews.delete(port);
+      this.previews.set(this.previews.get().filter((preview) => preview.port !== port));
+    }
+  }
+
+  // Update preview URL (used when provider gives us a new URL)
+  updatePreviewUrl(port: number, url: string): void {
+    const previewInfo = this.#availablePreviews.get(port);
+
+    if (previewInfo) {
+      previewInfo.baseUrl = url;
+      this.previews.set([...this.previews.get()]);
+      this.broadcastUpdate(url);
+    }
   }
 
   // Broadcast state change to all tabs

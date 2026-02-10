@@ -36,6 +36,7 @@
     "**/.client/**/*.tsx"
   ],
   "exclude": [
-    "functions/**/*"
+    "functions/**/*",
+    "specs/**/*"
   ]
 }

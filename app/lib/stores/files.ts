@@ -20,6 +20,7 @@ import {
   clearCache,
 } from '~/lib/persistence/lockedFiles';
 import { getCurrentChatId } from '~/utils/fileLocks';
+import type { FileSyncManager } from '~/lib/sandbox/file-sync';
 
 const logger = createScopedLogger('FilesStore');
 
@@ -107,6 +108,12 @@ export class FilesStore {
   #recentlySavedFiles: Set<string> = new Set();
 
   /**
+   * FileSyncManager for syncing file changes to cloud sandbox provider.
+   * When set, file operations will also sync through this manager.
+   */
+  #fileSyncManager: FileSyncManager | null = null;
+
+  /**
    * Map of files that matches the state of WebContainer.
    */
   files: MapStore<FileMap> = import.meta.hot?.data.files ?? map({});
@@ -164,6 +171,53 @@ export class FilesStore {
     }
 
     this.#init();
+  }
+
+  /**
+   * Pending writes that were requested before FileSyncManager was ready.
+   * Maps relative path to content.
+   */
+  #pendingSyncs: Map<string, string> = new Map();
+  #instanceId = Math.random().toString(36).substring(7);
+
+  /**
+   * Set the FileSyncManager for syncing file changes to cloud sandbox provider.
+   * When set, file save operations will also sync through this manager.
+   * @param manager The FileSyncManager instance or null to disable syncing
+   */
+  setFileSyncManager(manager: FileSyncManager | null): void {
+    logger.info(`[FilesStore:${this.#instanceId}] setFileSyncManager`, {
+      managerExists: !!manager,
+      pendingCount: this.#pendingSyncs.size,
+    });
+
+    this.#fileSyncManager = manager;
+
+    if (manager) {
+      // Flush pending syncs
+      if (this.#pendingSyncs.size > 0) {
+        logger.info(`[FilesStore:${this.#instanceId}] Flushing ${this.#pendingSyncs.size} pending file syncs`);
+
+        for (const [path, content] of this.#pendingSyncs.entries()) {
+          manager.queueWrite(path, content);
+        }
+
+        this.#pendingSyncs.clear();
+      }
+    } else {
+      // If manager is removed, clear pending syncs to avoid stale data
+      this.#pendingSyncs.clear();
+    }
+
+    logger.info('FileSyncManager', manager ? 'connected' : 'disconnected');
+  }
+
+  /**
+   * Get the current FileSyncManager instance.
+   * @returns The current FileSyncManager or null if not set
+   */
+  getFileSyncManager(): FileSyncManager | null {
+    return this.#fileSyncManager;
   }
 
   /**
@@ -612,60 +666,6 @@ export class FilesStore {
     logger.debug('Marked file as recently saved', { relativePath, timeout });
   }
 
-  async saveFile(filePath: string, content: string) {
-    const webcontainer = await this.#webcontainer;
-
-    try {
-      const relativePath = validateAndNormalizePath(webcontainer.workdir, filePath);
-
-      // Mark file as recently saved to prevent watcher from overwriting with stale/empty content
-      this.#recentlySavedFiles.add(relativePath);
-      setTimeout(() => this.#recentlySavedFiles.delete(relativePath), 500);
-
-      const currentFile = this.files.get()[relativePath];
-      const oldContent = currentFile?.type === 'file' ? currentFile.content : undefined;
-
-      /*
-       * If file doesn't exist in store yet, delegate to createFile.
-       * This handles the race condition where WebContainer writes happen
-       * before the file watcher updates the store.
-       */
-      if (oldContent === undefined) {
-        logger.debug('File not in store yet, creating:', relativePath);
-        await this.createFile(relativePath, content);
-
-        return;
-      }
-
-      await webcontainer.fs.writeFile(relativePath, content);
-
-      if (!this.#modifiedFiles.has(relativePath)) {
-        this.#modifiedFiles.set(relativePath, oldContent);
-      }
-
-      // Get the current lock state before updating
-      const isLocked = currentFile?.type === 'file' ? currentFile.isLocked : false;
-
-      // we immediately update the file and don't rely on the `change` event coming from the watcher
-      this.files.setKey(relativePath, {
-        type: 'file',
-        content,
-        isBinary: false,
-        isLocked,
-      });
-
-      logger.info('File updated', {
-        relativePath,
-        contentLength: content.length,
-        contentPreview: content.substring(0, 200),
-      });
-    } catch (error) {
-      logger.error('Failed to update file content\n\n', error);
-
-      throw error;
-    }
-  }
-
   async #init() {
     const webcontainer = await this.#webcontainer;
 
@@ -771,7 +771,20 @@ export class FilesStore {
   }
 
   #processEventBuffer(events: Array<[events: PathWatcherEvent[]]>) {
+    // Start timing
+    console.time('FilesStore:processEventBuffer');
+
     const watchEvents = events.flat(2);
+
+    // Log count
+    logger.debug(`Processing ${watchEvents.length} file system events`);
+
+    const currentFiles = this.files.get();
+    const updates: FileMap = {};
+    let hasChanges = false;
+
+    // Track size delta for this batch
+    let sizeDelta = 0;
 
     for (const { type, path, buffer } of watchEvents) {
       // Remove trailing slashes and normalize to relative path
@@ -792,15 +805,28 @@ export class FilesStore {
       switch (type) {
         case 'add_dir': {
           // we intentionally add a trailing slash so we can distinguish files from folders in the file tree
-          this.files.setKey(sanitizedPath, { type: 'folder' });
+          updates[sanitizedPath] = { type: 'folder' };
+          hasChanges = true;
           break;
         }
         case 'remove_dir': {
-          this.files.setKey(sanitizedPath, undefined);
+          updates[sanitizedPath] = undefined;
+          hasChanges = true;
 
-          for (const [direntPath] of Object.entries(this.files)) {
-            if (direntPath.startsWith(sanitizedPath)) {
-              this.files.setKey(direntPath, undefined);
+          /*
+           * Mark all known children for deletion
+           * Check current files
+           */
+          for (const [direntPath] of Object.entries(currentFiles)) {
+            if (direntPath.startsWith(sanitizedPath + '/')) {
+              updates[direntPath] = undefined;
+            }
+          }
+
+          // Also check pending updates (in case we added something in this batch then removed parent)
+          for (const [direntPath] of Object.entries(updates)) {
+            if (direntPath.startsWith(sanitizedPath + '/') && updates[direntPath] !== undefined) {
+              updates[direntPath] = undefined;
             }
           }
 
@@ -818,7 +844,7 @@ export class FilesStore {
           }
 
           if (type === 'add_file') {
-            this.#size++;
+            sizeDelta++;
           }
 
           let content = '';
@@ -842,13 +868,15 @@ export class FilesStore {
             contentPreview: content.substring(0, 200),
           });
 
-          this.files.setKey(sanitizedPath, { type: 'file', content, isBinary });
+          updates[sanitizedPath] = { type: 'file', content, isBinary };
+          hasChanges = true;
 
           break;
         }
         case 'remove_file': {
-          this.#size--;
-          this.files.setKey(sanitizedPath, undefined);
+          sizeDelta--;
+          updates[sanitizedPath] = undefined;
+          hasChanges = true;
           break;
         }
         case 'update_directory': {
@@ -857,6 +885,15 @@ export class FilesStore {
         }
       }
     }
+
+    // Apply updates
+    if (hasChanges) {
+      this.#size += sizeDelta;
+      this.files.set({ ...currentFiles, ...updates });
+      logger.debug(`Batch updated ${Object.keys(updates).length} paths`);
+    }
+
+    console.timeEnd('FilesStore:processEventBuffer');
   }
 
   #decodeFileContent(buffer?: Uint8Array) {
@@ -892,60 +929,81 @@ export class FilesStore {
     }
   }
 
-  async createFile(filePath: string, content: string | Uint8Array = '') {
+  /**
+   * Saves a file with optimistic UI updates and batched cloud syncing.
+   * This is the primary method for writing files in the Cloud-Native flow.
+   */
+  async saveFile(filePath: string, content: string | Uint8Array = '') {
     const webcontainer = await this.#webcontainer;
 
     try {
       const relativePath = validateAndNormalizePath(webcontainer.workdir, filePath);
-
       const dirPath = path.dirname(relativePath);
-
-      if (dirPath !== '.') {
-        await webcontainer.fs.mkdir(dirPath, { recursive: true });
-
-        /*
-         * Add folder entries to FilesStore immediately
-         * This prevents race condition with file watcher
-         */
-        this.#ensureParentFolders(relativePath);
-      }
-
-      // Mark file as recently saved to prevent watcher from overwriting with stale content
-      this.markRecentlySaved(relativePath, 2000);
-
       const isBinary = content instanceof Uint8Array;
 
-      if (isBinary) {
-        await webcontainer.fs.writeFile(relativePath, Buffer.from(content));
+      // 1. Ensure parent folders exist (Optimistic Store Update)
+      this.#ensureParentFolders(relativePath);
 
-        const base64Content = Buffer.from(content).toString('base64');
-        this.files.setKey(relativePath, {
-          type: 'file',
-          content: base64Content,
-          isBinary: true,
-          isLocked: false,
+      /*
+       * 2. Update File State Immediately (Optimistic Store Update)
+       * This allows the UI to reflect changes instantly without waiting for FS
+       */
+      const contentStr = isBinary ? Buffer.from(content).toString('base64') : (content as string);
+
+      this.files.setKey(relativePath, {
+        type: 'file',
+        content: contentStr,
+        isBinary,
+        isLocked: false,
+      });
+
+      this.#modifiedFiles.set(relativePath, contentStr);
+
+      // 3. Queue for Cloud Sync (Batched)
+      const syncContent = isBinary ? contentStr : (content as string) || ' ';
+
+      if (this.#fileSyncManager) {
+        logger.info(`[FilesStore:${this.#instanceId}] Queuing write for ${relativePath}`, {
+          hasManager: true,
+          contentLength: syncContent.length,
         });
 
-        this.#modifiedFiles.set(relativePath, base64Content);
+        this.#fileSyncManager.queueWrite(relativePath, syncContent);
       } else {
-        const contentToWrite = (content as string).length === 0 ? ' ' : content;
-        await webcontainer.fs.writeFile(relativePath, contentToWrite);
-
-        this.files.setKey(relativePath, {
-          type: 'file',
-          content: content as string,
-          isBinary: false,
-          isLocked: false,
-        });
-
-        this.#modifiedFiles.set(relativePath, content as string);
+        // Buffer the write until manager is available
+        logger.info(`[FilesStore:${this.#instanceId}] Buffering write for ${relativePath} (no manager yet)`);
+        this.#pendingSyncs.set(relativePath, syncContent);
       }
 
-      logger.info(`File created: ${relativePath}`);
+      /*
+       * 4. Persist to WebContainer (Background / Fire-and-Forget)
+       * We don't await this to prevent blocking the action runner
+       */
+      (async () => {
+        try {
+          if (dirPath !== '.') {
+            await webcontainer.fs.mkdir(dirPath, { recursive: true });
+          }
+
+          // Mark as recently saved to ignore the subsequent watcher event
+          this.markRecentlySaved(relativePath, 2000);
+
+          if (isBinary) {
+            await webcontainer.fs.writeFile(relativePath, Buffer.from(content));
+          } else {
+            const contentToWrite = (content as string).length === 0 ? ' ' : content;
+            await webcontainer.fs.writeFile(relativePath, contentToWrite);
+          }
+        } catch (err) {
+          logger.error('Background WebContainer write failed', err);
+        }
+      })();
+
+      logger.info(`File saved (optimistic): ${relativePath}`);
 
       return true;
     } catch (error) {
-      logger.error('Failed to create file\n\n', error);
+      logger.error('Failed to save file\n\n', error);
       throw error;
     }
   }

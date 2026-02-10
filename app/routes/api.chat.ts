@@ -370,7 +370,6 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
           });
 
           // Create a summary of the chat
-          console.log(`Messages count: ${processedMessages.length}`);
 
           // Create Langfuse generation for summary
           const summaryInputMessages = processedMessages.slice(-5).map((m) => ({
@@ -451,7 +450,6 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
           });
 
           // Select context files
-          console.log(`Messages count: ${processedMessages.length}`);
           filteredFiles = await selectContext({
             messages: uiMessagesToLegacy(processedMessages),
             files,
@@ -605,7 +603,6 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
           },
           onFinish: async ({ text: content, finishReason, usage }) => {
             // Log complete LLM response
-            console.log('[LLM RESPONSE COMPLETE]:', content);
 
             logger.debug('usage', JSON.stringify(usage));
 
@@ -806,7 +803,7 @@ async function chatAction({ context, request }: ActionFunctionArgs, session: { u
 
             // Log streaming text chunks
             if (part.type === 'text-delta') {
-              console.log('[LLM STREAM]:', part.text);
+              // Removed excessive LLM STREAM logging for performance
             }
 
             if (part.type === 'error') {

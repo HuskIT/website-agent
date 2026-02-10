@@ -1,0 +1,134 @@
+
+> bolt@1.0.0 build /Users/linhng/Documents/HyperPage-MVP/website-agent
+> remix vite:build
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[warn] Data fetching is changing to a single fetch in React Router v7
+┃ You can use the `v3_singleFetch` future flag to opt-in early.
+┃ -> https://remix.run/docs/en/2.13.1/start/future-flags#v3_singleFetch
+┗
+vite v5.4.21 building for production...
+transforming...
+✓ 771 modules transformed.
+x Build failed in 2.44s
+[commonjs--resolver] Could not load /Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/util@0.12.5/node_modules/util/types: ENOENT: no such file or directory, open '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/util@0.12.5/node_modules/util/types'
+file: /Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/undici@6.23.0/node_modules/undici/lib/global.js
+    at open (node:internal/fs/promises:640:25)
+    at Object.readFile (node:internal/fs/promises:1244:14)
+    at Object.load (file:///Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/vite@5.4.21_@types+node@24.10.11_sass-embedded@1.97.3_sass@1.97.3/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:65357:25)
+    at PluginDriver.hookFirstAndGetPlugin (file:///Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/rollup@4.57.1/node_modules/rollup/dist/es/shared/node-entry.js:22430:28)
+    at file:///Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/rollup@4.57.1/node_modules/rollup/dist/es/shared/node-entry.js:21422:33
+    at Queue.work (file:///Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/rollup@4.57.1/node_modules/rollup/dist/es/shared/node-entry.js:22658:32) {
+  errno: -2,
+  code: 'PLUGIN_ERROR',
+  syscall: 'open',
+  path: '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/util@0.12.5/node_modules/util/types',
+  pluginCode: 'ENOENT',
+  plugin: 'commonjs--resolver',
+  hook: 'resolveId',
+  id: '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/undici@6.23.0/node_modules/undici/lib/global.js',
+  watchFiles: [
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/root.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.$id.messages.recent.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.$id.messages.append.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.snapshot.$id.restore.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/webcontainer.vercel-preview.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.user.sandbox-preference.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.$id.snapshot.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.configured-providers.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/entry.client.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/webcontainer.connect.$id.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.cloudflare-validate.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.$id.messages.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/webcontainer.preview.$id.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.supabase.variables.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.system.diagnostics.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.cloudflare-deploy.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.reconnect.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.amplify-validate.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.crawler.generate.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.models.$provider.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.mcp-update-config.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.files.$path.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.cloudflare-stats.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.snapshot.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.system.disk-info.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.crawler.extract.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.cloudflare-init.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.github-branches.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.github-template.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.gitlab-branches.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.info-collection.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.gitlab-projects.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.export-api-keys.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.project.generate.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.system.git-info.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.amplify-deploy.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.crawler.search.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.netlify-deploy.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.create.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.extend.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.status.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.command.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.supabase.query.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.health.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.amplify-stats.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.deploy-status.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.check-env-key.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.files.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.supabase-user.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.site.generate.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.vercel-deploy.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.github-stats.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.netlify-user.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.$id.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.sandbox.stop.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.git-proxy.$.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.enhancer.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.mcp-check.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.bug-report.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.git-info.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.supabase.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/app.projects.new.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/auth.logout.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.github-user.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.llmcall.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.auth.$.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.projects.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.health.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/auth.signup.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.update.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.models.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/app._index.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/auth.login.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/chat.$id.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.vercel-user.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/git.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/_index.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/routes/api.chat.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/package.json',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/@remix-run+react@2.17.4_react-dom@18.3.1_react@18.3.1__react@18.3.1_typescript@5.9.3/node_modules/@remix-run/react/dist/esm/index.js',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/react@18.3.1/node_modules/react/jsx-runtime.js',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom/client.js',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/react@18.3.1/node_modules/react/index.js',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/ui/Button.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/ui/Input.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/lib/auth/auth.client.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/header/Header.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/chat/BaseChat.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/ui/BackgroundRays/index.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/projects/ProjectErrorBoundary.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/chat/Chat.client.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/utils/logger.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/projects/CreateProjectPage.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/landing/LandingPage.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/projects/ProjectList.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/git/GitUrlImport.client.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/lib/persistence/useProjects.ts',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/app/components/auth/UserMenu.tsx',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom/index.js',
+    '/Users/linhng/Documents/HyperPage-MVP/website-agent/node_modules/.pnpm/react@18.3.1/node_modules/react/cjs/react-jsx-runtime.development.js',
+    ... 703 more items
+  ]
+}
+ ELIFECYCLE  Command failed with exit code 1.

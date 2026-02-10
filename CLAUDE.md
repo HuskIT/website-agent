@@ -306,6 +306,18 @@ Action Runner → WebContainer → File Changes → Preview Update
 - Migrations: `supabase/migrations/` (SQL files with timestamps)
 - Migration scripts: `scripts/migrate-auth.ts` (automated with safety checks)
 
+**11. Sandbox Provider Architecture (001-sandbox-providers)**
+Multi-provider code execution supporting both local (WebContainer) and cloud (Vercel) sandboxes:
+- **Provider Interface**: `app/lib/sandbox/types.ts` defines `SandboxProvider` with methods for connect, disconnect, writeFiles, readFile, runCommand
+- **WebContainer Provider**: `app/lib/sandbox/providers/webcontainer.ts` - Local browser-based execution
+- **Vercel Provider**: `app/lib/sandbox/providers/vercel-sandbox.ts` - Cloud execution via Vercel Sandbox API
+- **Provider Factory**: `app/lib/sandbox/index.ts` with `createSandboxProvider()` and `resolveProviderType()`
+- **File Sync Manager**: `app/lib/sandbox/file-sync.ts` batches file changes for efficient cloud sync
+- **Timeout Manager**: `app/lib/sandbox/timeout-manager.ts` tracks session timeout, warns before expiry, auto-extends on activity
+- **API Routes**: `api.sandbox.*` routes proxy Vercel SDK calls (server-side only)
+- **Settings UI**: Settings panel at `app/components/@settings/tabs/sandbox/SandboxTab.tsx` for provider preference
+- **Feature Flag**: `SANDBOX_VERCEL_ENABLED` env var controls Vercel Sandbox availability
+
 ### WebContainer Constraints
 - **Memory**: ~1 GB limit for cloned templates
 - **File System**: Virtual FS, synced from Nanostores file state

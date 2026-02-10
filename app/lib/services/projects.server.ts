@@ -955,3 +955,80 @@ export async function generateDeploymentPackage(projectId: string): Promise<Buff
     );
   }
 }
+
+/**
+ * Get the latest project snapshot (most recently updated)
+ * Used for Vercel snapshot restoration
+ */
+export async function getLatestProjectSnapshot(projectId: string, userId?: string): Promise<ProjectSnapshot | null> {
+  logger.info('Getting latest project snapshot', { projectId, userId });
+
+  if (!userId) {
+    throw SupabaseRlsError.invalidUserId();
+  }
+
+  const supabase = await createUserSupabaseClient(userId);
+
+  const { data: snapshot, error } = await supabase
+    .from('project_snapshots')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      // No snapshot found
+      logger.info('No snapshot found for project', { projectId });
+      return null;
+    }
+
+    logger.error('Failed to get latest snapshot', { error, projectId });
+    throw new Error(`Failed to get latest snapshot: ${error.message}`);
+  }
+
+  logger.info('Latest snapshot retrieved', {
+    projectId,
+    snapshotId: snapshot.id,
+    hasVercelSnapshotId: !!snapshot.vercel_snapshot_id,
+  });
+
+  return snapshot as ProjectSnapshot;
+}
+
+/**
+ * Update a project snapshot with partial data
+ * Used to add vercel_snapshot_id after Vercel snapshot creation
+ */
+export async function updateProjectSnapshot(
+  snapshotId: string,
+  updates: Partial<ProjectSnapshot>,
+  userId?: string,
+): Promise<void> {
+  logger.info('Updating project snapshot', { snapshotId, userId, updates: Object.keys(updates) });
+
+  if (!userId) {
+    throw SupabaseRlsError.invalidUserId();
+  }
+
+  const supabase = await createUserSupabaseClient(userId);
+
+  // Remove fields that shouldn't be updated directly
+  const { id: _id, project_id: _projectId, created_at: _createdAt, ...updateableFields } = updates as any;
+
+  const { error } = await supabase
+    .from('project_snapshots')
+    .update({
+      ...updateableFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', snapshotId);
+
+  if (error) {
+    logger.error('Failed to update snapshot', { error, snapshotId, updates: Object.keys(updates) });
+    throw new Error(`Failed to update snapshot: ${error.message}`);
+  }
+
+  logger.info('Snapshot updated successfully', { snapshotId });
+}

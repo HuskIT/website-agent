@@ -28,6 +28,8 @@ import { ExportChatButton } from '~/components/chat/chatExportAndImport/ExportCh
 import { useChatHistory } from '~/lib/persistence';
 import { streamingState } from '~/lib/stores/streaming';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { TimeoutWarning, useTimeoutWarning } from './TimeoutWarning';
+import { ProviderBadge } from './ProviderBadge';
 
 interface WorkspaceProps {
   isStreaming?: boolean;
@@ -304,6 +306,34 @@ export const Workbench = memo(
     const { exportChat } = useChatHistory();
     const [isSyncing, setIsSyncing] = useState(false);
 
+    // Timeout warning state (001-sandbox-providers)
+    const {
+      isVisible: showTimeoutWarning,
+      timeRemainingMs,
+      showWarning,
+      hideWarning,
+      updateTimeRemaining,
+    } = useTimeoutWarning();
+
+    // Set up timeout warning listener
+    useEffect(() => {
+      const timeoutManager = workbenchStore.timeoutManager;
+
+      if (!timeoutManager) {
+        return undefined;
+      }
+
+      const unsubscribe = timeoutManager.onStateChange((state) => {
+        if (state.warningShown && !showTimeoutWarning) {
+          showWarning(state.timeRemainingMs);
+        } else if (state.timeRemainingMs > 0) {
+          updateTimeRemaining(state.timeRemainingMs);
+        }
+      });
+
+      return () => unsubscribe();
+    }, [showWarning, hideWarning, updateTimeRemaining, showTimeoutWarning]);
+
     const setSelectedView = (view: WorkbenchViewType) => {
       workbenchStore.currentView.set(view);
     };
@@ -375,6 +405,13 @@ export const Workbench = memo(
           variants={workbenchVariants}
           className="z-workbench"
         >
+          {/* Timeout Warning Toast (001-sandbox-providers) */}
+          <TimeoutWarning
+            isVisible={showTimeoutWarning}
+            timeRemainingMs={timeRemainingMs}
+            onExtend={() => workbenchStore.requestTimeoutExtension(5 * 60 * 1000)}
+            onDismiss={hideWarning}
+          />
           <div
             className={classNames(
               'fixed top-[calc(var(--header-height)+1.2rem)] bottom-6 z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier',
@@ -393,6 +430,9 @@ export const Workbench = memo(
                 <div className="flex items-center px-3 py-2 border-b border-bolt-elements-borderColor gap-1.5">
                   <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
                   <div className="ml-auto" />
+
+                  {/* Provider Badge (001-sandbox-providers) */}
+                  <ProviderBadge className="mr-2" />
                   {selectedView === 'code' && (
                     <div className="flex overflow-y-auto">
                       {/* Export Chat Button */}

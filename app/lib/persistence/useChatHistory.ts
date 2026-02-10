@@ -432,6 +432,31 @@ ${value.content}
         retryCount: 0,
         lastRetryAt: null,
       });
+
+      // Initialize sandbox provider for this project
+      if (projectId) {
+        try {
+          console.log('🔥🔥🔥 useChatHistory: About to call reconnectOrRestore', { projectId });
+          logger.info('Initializing sandbox provider for project', { projectId });
+
+          const result = await workbenchStore.reconnectOrRestore(projectId);
+          console.log('🔥🔥🔥 useChatHistory: reconnectOrRestore returned', { result });
+
+          if (result.success) {
+            logger.info('Sandbox provider initialized', {
+              projectId,
+              providerType: workbenchStore.currentProviderType,
+              restored: result.restored,
+            });
+          } else {
+            logger.warn('Failed to initialize sandbox provider', { projectId });
+          }
+        } catch (error) {
+          logger.error('Error initializing sandbox provider', { error, projectId });
+
+          // Don't fail the whole load if sandbox init fails
+        }
+      }
     };
 
     // Execute the loadMessages function
@@ -657,26 +682,44 @@ ${value.content}
       }
     }
 
-    // Second pass: create all files
+    // Second pass: populate file store directly (cloud-native - no WebContainer)
     const files = entries.filter(([, value]) => value?.type === 'file');
+    const fileMap: Record<
+      string,
+      { type: 'file'; content: string; isBinary: boolean; isLocked: boolean } | { type: 'folder' }
+    > = {};
 
+    // Add folders to map
+    for (const [folderPath] of folders) {
+      const normalizedPath = stripWorkDirPrefix(folderPath);
+
+      if (normalizedPath) {
+        fileMap[normalizedPath] = { type: 'folder' };
+      }
+    }
+
+    // Add files to map
     for (const [filePath, value] of files) {
       if (value?.type === 'file') {
         const normalizedPath = stripWorkDirPrefix(filePath);
 
-        if (!normalizedPath) {
-          continue;
-        }
-
-        try {
-          await workbenchStore.createFile(normalizedPath, value.content);
-        } catch (error) {
-          logger.error('Failed to create file from snapshot', { filePath: normalizedPath, error: String(error) });
+        if (normalizedPath) {
+          fileMap[normalizedPath] = {
+            type: 'file',
+            content: value.content,
+            isBinary: value.isBinary || false,
+            isLocked: false,
+          };
         }
       }
     }
 
-    logger.info('Snapshot restoration complete', {
+    // Update file store in one atomic operation (instant UI)
+    console.log('🔥🔥🔥 useChatHistory: Populating file store with', Object.keys(fileMap).length, 'entries');
+    workbenchStore.filesStore.files.set(fileMap);
+    console.log('🔥🔥🔥 useChatHistory: File store populated');
+
+    logger.info('Snapshot files loaded to store (cloud-native)', {
       id,
       foldersCreated: folders.length,
       filesCreated: files.length,
@@ -686,6 +729,11 @@ ${value.content}
     if (files.length > 0) {
       workbenchStore.setShowWorkbench(true);
     }
+
+    /*
+     * Note: Files will be uploaded to sandbox via restoreFromDatabaseSnapshot()
+     * when reconnectOrRestore() is called next
+     */
   }, []);
 
   // Compute effective ready state: only ready if data belongs to current ID

@@ -1,6 +1,7 @@
 import { cloudflareDevProxyVitePlugin as remixCloudflareDevProxy, vitePlugin as remixVitePlugin } from '@remix-run/dev';
 import UnoCSS from 'unocss/vite';
 import { defineConfig, type ViteDevServer } from 'vite';
+
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -10,10 +11,12 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 // Load environment variables from multiple files
+// Load environment variables from multiple files
 dotenv.config({ path: '.env.local' });
 dotenv.config({ path: '.env' });
 dotenv.config();
 
+// FORCE CACHE INVALIDATION: v3
 export default defineConfig((config) => {
   return {
     define: {
@@ -256,7 +259,7 @@ export default defineConfig((config) => {
     ],
     ssr: {
       // Don't apply browser polyfills in SSR - use native Node.js modules
-      external: ['path', 'fs', 'fs/promises'],
+      external: ['path', 'fs', 'fs/promises', 'util', 'util/types', 'undici'],
     },
     css: {
       preprocessorOptions: {
@@ -268,6 +271,9 @@ export default defineConfig((config) => {
     test: {
       environment: 'node',
       setupFiles: ['./vitest.setup.ts'],
+      alias: {
+        '@web3-storage/multipart-parser/esm/src/index.js': '/test/stubs/multipart-parser.ts',
+      },
       server: {
         deps: {
           inline: [

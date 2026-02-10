@@ -6,8 +6,11 @@ import { createScopedLogger } from '~/utils/logger';
 import { unreachable } from '~/utils/unreachable';
 import type { ActionCallbackData } from './message-parser';
 import type { BoltShell } from '~/utils/shell';
+import type { VercelShell } from '~/lib/sandbox/vercel-terminal';
 import { applyEdit, groupEditsByFile, parseEditBlocks, sortEditsForApplication } from './edit-parser';
 import { ENABLE_AST_MATCHING, getAstContext } from './ast-context';
+import type { SandboxProvider } from '~/lib/sandbox/types';
+import { getProviderInstance } from '~/lib/stores/sandbox';
 
 const logger = createScopedLogger('ActionRunner');
 
@@ -68,7 +71,7 @@ class ActionCommandError extends Error {
 export class ActionRunner {
   #webcontainer: Promise<WebContainer>;
   #currentExecutionPromise: Promise<void> = Promise.resolve();
-  #shellTerminal: () => BoltShell;
+  #shellTerminal: () => BoltShell | VercelShell;
   #onMarkRecentlySaved?: (relativePath: string, timeout?: number) => void;
   runnerId = atom<string>(`${Date.now()}`);
   actions: ActionsMap = map({});
@@ -79,7 +82,7 @@ export class ActionRunner {
 
   constructor(
     webcontainerPromise: Promise<WebContainer>,
-    getShellTerminal: () => BoltShell,
+    getShellTerminal: () => BoltShell | VercelShell,
     onAlert?: (alert: ActionAlert) => void,
     onSupabaseAlert?: (alert: SupabaseAlert) => void,
     onDeployAlert?: (alert: DeployAlert) => void,
@@ -91,6 +94,60 @@ export class ActionRunner {
     this.onSupabaseAlert = onSupabaseAlert;
     this.onDeployAlert = onDeployAlert;
     this.#onMarkRecentlySaved = onMarkRecentlySaved;
+  }
+
+  /**
+   * Get the active SandboxProvider if available and connected, otherwise null.
+   * Dynamically checks provider status to handle async connection timing.
+   */
+  async #getProvider(): Promise<SandboxProvider | null> {
+    const provider = getProviderInstance();
+
+    // Check if provider exists and is a Vercel Sandbox
+    if (provider && provider.type === 'vercel') {
+      // If connected, return immediately
+      if (provider.status === 'connected') {
+        return provider;
+      }
+
+      // If connecting or reconnecting, wait for it
+      if (provider.status === 'connecting' || provider.status === 'reconnecting') {
+        console.log('[ActionRunner] Provider connecting, waiting...');
+
+        try {
+          // Wait up to 5 seconds for connection
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              cleanup();
+              reject(new Error('Provider connection timeout'));
+            }, 5000);
+
+            const cleanup = provider.onStatusChange((status) => {
+              if (status === 'connected') {
+                cleanup();
+                clearTimeout(timeout);
+                resolve();
+              } else if (status === 'disconnected' || status === 'error') {
+                cleanup();
+                clearTimeout(timeout);
+                reject(new Error(`Provider failed to connect: ${status}`));
+              }
+            });
+          });
+
+          // Re-check status after wait
+          const currentProvider = getProviderInstance();
+
+          if (currentProvider && currentProvider.status === 'connected') {
+            return currentProvider;
+          }
+        } catch (error) {
+          console.warn('[ActionRunner] Failed to wait for provider connection:', error);
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -269,6 +326,61 @@ export class ActionRunner {
       unreachable('Expected shell action');
     }
 
+    // Try to use provider abstraction if available (Vercel Sandbox)
+    const provider = await this.#getProvider();
+
+    // Debug logging for provider routing
+    console.log('[ActionRunner] Shell action routing check', {
+      hasProvider: !!provider,
+      providerType: provider?.type,
+      providerStatus: provider?.status,
+      command: action.content.substring(0, 50),
+      timestamp: Date.now(),
+    });
+
+    if (provider && provider.status === 'connected') {
+      console.log(`[ActionRunner] 🚀 Running shell command via Vercel Sandbox: ${action.content.substring(0, 50)}...`);
+
+      // Pre-validate command for common issues (skip for Vercel - it handles this better)
+      const validationResult = await this.#validateShellCommand(action.content);
+
+      if (validationResult.shouldModify && validationResult.modifiedCommand) {
+        logger.debug(`Modified command: ${action.content} -> ${validationResult.modifiedCommand}`);
+        action.content = validationResult.modifiedCommand;
+      }
+
+      try {
+        // Parse command for provider execution
+        const { cmd, args } = this.#parseCommand(action.content);
+
+        const result = await provider.runCommand(cmd, args);
+
+        logger.debug(`Provider shell response: [exit code:${result.exitCode}]`);
+
+        if (result.exitCode !== 0) {
+          const enhancedError = this.#createEnhancedShellError(
+            action.content,
+            result.exitCode,
+            result.stderr || result.stdout,
+          );
+          throw new ActionCommandError(enhancedError.title, enhancedError.details);
+        }
+
+        return;
+      } catch (error) {
+        if (error instanceof ActionCommandError) {
+          throw error;
+        }
+
+        logger.warn('Provider command failed, falling back to WebContainer', error);
+
+        // Fall through to WebContainer
+      }
+    }
+
+    // Fallback to WebContainer
+    console.log('[ActionRunner] Falling back to WebContainer for shell command');
+
     const shell = this.#shellTerminal();
     await shell.ready();
 
@@ -296,10 +408,94 @@ export class ActionRunner {
     }
   }
 
+  /**
+   * Parse a shell command string into command and arguments
+   */
+  #parseCommand(command: string): { cmd: string; args: string[] } {
+    const trimmed = command.trim();
+
+    // Handle quoted arguments
+    const parts: string[] = [];
+    let current = '';
+    let inQuote = false;
+    let quoteChar = '';
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const char = trimmed[i];
+
+      if (!inQuote && (char === '"' || char === "'")) {
+        inQuote = true;
+        quoteChar = char;
+
+        if (current) {
+          parts.push(current);
+        }
+
+        current = '';
+      } else if (inQuote && char === quoteChar) {
+        inQuote = false;
+        parts.push(current);
+        current = '';
+      } else if (!inQuote && /\s/.test(char)) {
+        if (current) {
+          parts.push(current);
+          current = '';
+        }
+      } else {
+        current += char;
+      }
+    }
+
+    if (current) {
+      parts.push(current);
+    }
+
+    const cmd = parts[0] || trimmed;
+    const args = parts.slice(1);
+
+    return { cmd, args };
+  }
+
   async #runStartAction(action: ActionState) {
     if (action.type !== 'start') {
-      unreachable('Expected shell action');
+      unreachable('Expected start action');
     }
+
+    // Try to use provider abstraction if available (Vercel Sandbox)
+    const provider = await this.#getProvider();
+
+    // Debug logging for provider routing
+    console.log('[ActionRunner] Start action routing check', {
+      hasProvider: !!provider,
+      providerType: provider?.type,
+      providerStatus: provider?.status,
+      command: action.content.substring(0, 50),
+      timestamp: Date.now(),
+    });
+
+    if (provider && provider.status === 'connected') {
+      console.log(`[ActionRunner] 🚀 Running start command via Vercel Sandbox: ${action.content.substring(0, 50)}...`);
+
+      try {
+        // Parse command for provider execution
+        const { cmd, args } = this.#parseCommand(action.content);
+
+        // Fire and forget for dev server (it runs indefinitely)
+        provider.runCommand(cmd, args).catch((error) => {
+          logger.error('Provider start command failed:', error);
+        });
+
+        // Return immediately (dev server runs in background)
+        return;
+      } catch (error) {
+        logger.warn('Provider start command setup failed, falling back to WebContainer', error);
+
+        // Fall through to WebContainer
+      }
+    }
+
+    // Fallback to WebContainer
+    console.log('[ActionRunner] Falling back to WebContainer for start command');
 
     if (!this.#shellTerminal) {
       unreachable('Shell terminal not found');
@@ -322,7 +518,7 @@ export class ActionRunner {
       throw new ActionCommandError('Failed To Start Application', resp?.output || 'No Output Available');
     }
 
-    return resp;
+    return;
   }
 
   async #runFileAction(action: ActionState) {
@@ -330,33 +526,13 @@ export class ActionRunner {
       unreachable('Expected file action');
     }
 
-    const webcontainer = await this.#webcontainer;
-    const normalizedPath = action.filePath.startsWith('/') ? action.filePath.slice(1) : action.filePath;
-    const absolutePath = nodePath.join(webcontainer.workdir, normalizedPath);
-    const relativePath = nodePath.relative(webcontainer.workdir, absolutePath);
-
-    let folder = nodePath.dirname(relativePath);
-
-    // remove trailing slashes
-    folder = folder.replace(/\/+$/g, '');
-
-    if (folder !== '.') {
-      try {
-        await webcontainer.fs.mkdir(folder, { recursive: true });
-        logger.debug('Created folder', folder);
-      } catch (error) {
-        logger.error('Failed to create folder\n\n', error);
-      }
-    }
-
     try {
-      // Mark file as recently saved to prevent file watcher from overwriting with stale content
-      this.#onMarkRecentlySaved?.(relativePath, 1000);
-
-      await webcontainer.fs.writeFile(relativePath, action.content);
-      logger.debug(`File written ${relativePath}`);
+      // Use FilesStore to save file (handles optimistic updates, cloud sync, and local fallback)
+      const { workbenchStore } = await import('~/lib/stores/workbench');
+      logger.info('[ActionRunner] Calling saveFile', { filePath: action.filePath });
+      await workbenchStore.filesStore.saveFile(action.filePath, action.content);
     } catch (error) {
-      logger.error('Failed to write file\n\n', error);
+      logger.error('Failed to run file action\n\n', error);
     }
   }
 
@@ -365,7 +541,10 @@ export class ActionRunner {
       unreachable('Expected edit action');
     }
 
-    const webcontainer = await this.#webcontainer;
+    const provider = await this.#getProvider();
+    const useProvider = provider && provider.status === 'connected';
+    const webcontainer = useProvider ? null : await this.#webcontainer;
+
     const { blocks, errors } = parseEditBlocks(action.content);
 
     if (errors.length > 0) {
@@ -389,13 +568,26 @@ export class ActionRunner {
 
     for (const [filePath, fileBlocks] of editsByFile) {
       const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-      const absolutePath = nodePath.join(webcontainer.workdir, normalizedPath);
-      const relativePath = nodePath.relative(webcontainer.workdir, absolutePath);
+      const relativePath = webcontainer
+        ? nodePath.relative(webcontainer.workdir, nodePath.join(webcontainer.workdir, normalizedPath))
+        : normalizedPath;
 
       let fileContent: string;
 
       try {
-        fileContent = await webcontainer.fs.readFile(relativePath, 'utf-8');
+        if (useProvider && provider) {
+          const content = await provider.readFile(relativePath);
+
+          if (content === null) {
+            throw new Error('File not found');
+          }
+
+          fileContent = content;
+        } else if (webcontainer) {
+          fileContent = await webcontainer.fs.readFile(relativePath, 'utf-8');
+        } else {
+          throw new Error('No provider or WebContainer available');
+        }
       } catch (error) {
         logger.warn(`File not found for edit: ${relativePath}`, error);
         this.onAlert?.({
@@ -450,7 +642,9 @@ export class ActionRunner {
       }
 
       if (applied > 0 && currentContent !== fileContent) {
-        await webcontainer.fs.writeFile(relativePath, currentContent);
+        const { workbenchStore } = await import('~/lib/stores/workbench');
+        await workbenchStore.filesStore.saveFile(filePath, currentContent);
+
         logger.info(`Edited ${filePath}: ${applied} edits applied`);
       }
 
@@ -475,8 +669,20 @@ export class ActionRunner {
 
   async getFileHistory(filePath: string): Promise<FileHistory | null> {
     try {
-      const webcontainer = await this.#webcontainer;
+      const provider = await this.#getProvider();
       const historyPath = this.#getHistoryPath(filePath);
+
+      if (provider && provider.status === 'connected') {
+        const content = await provider.readFile(historyPath);
+
+        if (content === null) {
+          return null;
+        }
+
+        return JSON.parse(content);
+      }
+
+      const webcontainer = await this.#webcontainer;
       const content = await webcontainer.fs.readFile(historyPath, 'utf-8');
 
       return JSON.parse(content);
@@ -518,21 +724,45 @@ export class ActionRunner {
       source: 'netlify',
     });
 
-    const webcontainer = await this.#webcontainer;
-
-    // Create a new terminal specifically for the build
-    const buildProcess = await webcontainer.spawn('npm', ['run', 'build']);
-
+    // Try to use provider abstraction if available (Vercel Sandbox)
+    const provider = await this.#getProvider();
+    let exitCode: number | undefined;
     let output = '';
-    buildProcess.output.pipeTo(
-      new WritableStream({
-        write(data) {
-          output += data;
-        },
-      }),
-    );
 
-    const exitCode = await buildProcess.exit;
+    if (provider && provider.status === 'connected') {
+      logger.debug('Running build via provider');
+
+      try {
+        const result = await provider.runCommand('npm', ['run', 'build']);
+        exitCode = result.exitCode;
+        output = result.stdout + result.stderr;
+
+        logger.debug(`Provider build response: [exit code:${exitCode}]`);
+      } catch (error) {
+        logger.warn('Provider build failed, falling back to WebContainer', error);
+
+        // Fall through to WebContainer
+        exitCode = undefined;
+      }
+    }
+
+    // Fallback to WebContainer if provider not available or failed
+    if (exitCode === undefined) {
+      const webcontainer = await this.#webcontainer;
+
+      // Create a new terminal specifically for the build
+      const buildProcess = await webcontainer.spawn('npm', ['run', 'build']);
+
+      buildProcess.output.pipeTo(
+        new WritableStream({
+          write(data) {
+            output += data;
+          },
+        }),
+      );
+
+      exitCode = await buildProcess.exit;
+    }
 
     if (exitCode !== 0) {
       // Trigger build failed alert
@@ -565,15 +795,29 @@ export class ActionRunner {
     const commonBuildDirs = ['dist', 'build', 'out', 'output', '.next', 'public'];
 
     let buildDir = '';
+    const workdir = '/home/project'; // Standard workdir for both providers
 
     // Try to find the first existing build directory
     for (const dir of commonBuildDirs) {
-      const dirPath = nodePath.join(webcontainer.workdir, dir);
+      const dirPath = nodePath.join(workdir, dir);
 
       try {
-        await webcontainer.fs.readdir(dirPath);
-        buildDir = dirPath;
-        break;
+        // Use provider if available, otherwise WebContainer
+        if (provider && provider.status === 'connected') {
+          // For provider, check if directory exists using ls command
+          const result = await provider.runCommand('ls', [dirPath]);
+
+          if (result.exitCode === 0) {
+            buildDir = dirPath;
+            break;
+          }
+        } else {
+          // WebContainer path
+          const webcontainer = await this.#webcontainer;
+          await webcontainer.fs.readdir(dirPath);
+          buildDir = dirPath;
+          break;
+        }
       } catch {
         continue;
       }
@@ -581,7 +825,7 @@ export class ActionRunner {
 
     // If no build directory was found, use the default (dist)
     if (!buildDir) {
-      buildDir = nodePath.join(webcontainer.workdir, 'dist');
+      buildDir = nodePath.join(workdir, 'dist');
     }
 
     return {
