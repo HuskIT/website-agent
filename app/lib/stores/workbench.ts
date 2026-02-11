@@ -2092,16 +2092,15 @@ export class WorkbenchStore {
       /*
        * Determine if this is a Vite project – if so, append --host so the dev
        * server binds to 0.0.0.0 (needed for Vercel Sandbox port proxy).
-       * Run npm directly (not via sh) to avoid PATH issues in the sandbox.
        */
       const isVite = (scripts[scriptName] || '').includes('vite');
-      const devArgs = isVite ? ['run', scriptName, '--', '--host'] : ['run', scriptName];
+      const npmCommand = isVite ? `npm run ${scriptName} -- --host` : `npm run ${scriptName}`;
 
-      logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
+      logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, npmCommand });
 
       /*
        * Start the dev server with error handling and retry logic.
-       * Try primary command first, then fallback to alternatives if it fails.
+       * Try sh -c first (works most of the time), then fallback to direct npm if sh fails.
        */
 
       // Set up promise that resolves when dev server is ready
@@ -2112,24 +2111,40 @@ export class WorkbenchStore {
         resolveDevServerReady = resolve;
       });
 
-      // Define command alternatives to try
+      // Define command alternatives to try (in order of preference)
       const commandAttempts: Array<{ cmd: string; args: string[]; description: string }> = [
-        { cmd: 'npm', args: devArgs, description: `npm run ${scriptName}${isVite ? ' -- --host' : ''}` },
+        // Primary: sh -c (works most of the time, handles shell features properly)
+        { cmd: 'sh', args: ['-c', npmCommand], description: `sh -c "${npmCommand}"` },
+
+        // Fallback 1: Direct npm (for when sh has PATH issues)
+        {
+          cmd: 'npm',
+          args: isVite ? ['run', scriptName, '--', '--host'] : ['run', scriptName],
+          description: `npm run ${scriptName}${isVite ? ' -- --host' : ''}`,
+        },
       ];
 
-      // Add alternative if different script is available
+      // Fallback 2: Alternative script if available (dev vs start)
       if (scriptName === 'dev' && scripts.start) {
-        commandAttempts.push({
-          cmd: 'npm',
-          args: isVite ? ['run', 'start', '--', '--host'] : ['run', 'start'],
-          description: `npm run start${isVite ? ' -- --host' : ''}`,
-        });
+        const altCommand = isVite ? `npm run start -- --host` : `npm run start`;
+        commandAttempts.push(
+          { cmd: 'sh', args: ['-c', altCommand], description: `sh -c "${altCommand}"` },
+          {
+            cmd: 'npm',
+            args: isVite ? ['run', 'start', '--', '--host'] : ['run', 'start'],
+            description: `npm run start${isVite ? ' -- --host' : ''}`,
+          },
+        );
       } else if (scriptName === 'start' && scripts.dev) {
-        commandAttempts.push({
-          cmd: 'npm',
-          args: isVite ? ['run', 'dev', '--', '--host'] : ['run', 'dev'],
-          description: `npm run dev${isVite ? ' -- --host' : ''}`,
-        });
+        const altCommand = isVite ? `npm run dev -- --host` : `npm run dev`;
+        commandAttempts.push(
+          { cmd: 'sh', args: ['-c', altCommand], description: `sh -c "${altCommand}"` },
+          {
+            cmd: 'npm',
+            args: isVite ? ['run', 'dev', '--', '--host'] : ['run', 'dev'],
+            description: `npm run dev${isVite ? ' -- --host' : ''}`,
+          },
+        );
       }
 
       logger.debug('[DEBUG #autoStartDevServer] Command attempts:', commandAttempts);
