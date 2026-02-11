@@ -111,8 +111,8 @@ export function getDefaultProviderType(): SandboxProviderType {
     return envDefault;
   }
 
-  // Default to vercel for cloud-first approach (MVP)
-  return 'vercel';
+  // Default to webcontainer if Vercel is not enabled
+  return isVercelEnabled() ? 'vercel' : 'webcontainer';
 }
 
 /**

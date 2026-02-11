@@ -32,7 +32,8 @@ let langfuseInstance: Langfuse | null = null;
  * In Vite dev server, context.cloudflare is undefined, so we fall back to process.env.
  */
 function getEffectiveEnv(env?: Env): Env | undefined {
-  if (env) {
+  if (env?.LANGFUSE_ENABLED) {
+    console.log('[LANGFUSE DEBUG] Using env parameter');
     return env;
   }
 

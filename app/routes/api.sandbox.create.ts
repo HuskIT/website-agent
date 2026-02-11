@@ -18,16 +18,7 @@ const VERCEL_PROJECT_ID = process.env.VERCEL_PROJECT_ID;
 
 const logger = createScopedLogger('api.sandbox.create');
 
-// Debug: Log environment variable status
-logger.info('Environment check', {
-  hasToken: !!VERCEL_TOKEN,
-  tokenPrefix: VERCEL_TOKEN ? VERCEL_TOKEN.substring(0, 10) + '...' : 'none',
-  teamId: VERCEL_TEAM_ID,
-  projectId: VERCEL_PROJECT_ID,
-  nodeEnv: process.env.NODE_ENV,
-});
-
-// Log if token is missing (for debugging)
+// Log if credentials are missing
 if (!VERCEL_TOKEN) {
   logger.warn('VERCEL_TOKEN is not set in environment');
 }
@@ -184,8 +175,6 @@ export async function action({ request }: ActionFunctionArgs) {
         timeout: sandboxOptions.timeout,
       });
 
-      // Debug: log exact options being passed
-      console.log('Sandbox.create options:', JSON.stringify(sandboxOptions, null, 2));
       sandbox = await Sandbox.create(sandboxOptions);
     } catch (createError: any) {
       // Enhanced error logging
@@ -211,7 +200,6 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       logger.error('Sandbox.create failed - FULL DETAILS', errorDetails);
-      console.error('Full error object:', createError);
       throw createError;
     }
 
