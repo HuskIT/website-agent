@@ -93,7 +93,7 @@ _Focus on the "Narrative" and "Texture" of these modules._
 
 ---
 
-## 6. DATA STRUCTURE (`data/content.ts`)**
+## 6. DATA STRUCTURE (`data/content.ts`)\*\*
 
 ### STRUCTURE REFERENCE
 
@@ -102,6 +102,7 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 #### `siteText`
 
 ##### `aboutTeaser`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"Our Philosophy"`
 - `body` (string, required) — 2–3 sentences describing the restaurant's philosophy or values. Warm, personal tone.
 - `cta` (object, required):
@@ -111,10 +112,12 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 - `caption` (string, required) — Short image caption, 2–4 words. Example: `"Made with love"`
 
 ##### `branding`
+
 - `name` (string, required) — Business name. Example: `"The Rustic Table"`
 - `tagline` (string, required) — 1 sentence brand tagline. Example: `"Simple ingredients, timeless flavors, and a seat for everyone at our table."`
 
 ##### `footer`
+
 - `address` (string, required) — Full address. Example: `"128 Hearthstone Lane, Willow Creek, VT"`
 - `copyrightTemplate` (string, required) — Copyright text. Format: `"[Business Name]. All rights reserved."`. Example: `"The Rustic Table. All rights reserved."`
 - `hours` (string, required) — Operating hours. Example: `"Tue-Sun: 5pm - 10pm"`
@@ -124,12 +127,14 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 - `makeReservationText` (string, required) — Link label. Example: `"Make a Reservation"`
 
 ##### `galleryPage`
+
 - `title` (string, required) — Page title. 1 word. Example: `"Moments"`
 - `subtitle` (string, required) — 1 short sentence. Example: `"A visual diary of our days."`
 - `imageAltPrefix` (string, required) — Prefix for gallery image alt text. Example: `"Gallery item"`
 - `captionPrefix` (string, required) — Prefix for gallery image captions. Example: `"No."`
 
 ##### `galleryTeaser`
+
 - `heading` (string, required) — Section heading. 2–3 words. Example: `"Moments Shared"`
 - `imageAltPrefix` (string, required) — Prefix for teaser image alt text. Example: `"Gallery"`
 - `cta` (object, required):
@@ -137,6 +142,7 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
   - `link` (string, required) — **IMMUTABLE. Must always be `"/gallery"`.**
 
 ##### `hero`
+
 - `eyebrow` (string, required) — Small text above the headline. 1–3 words. Example: `"Welcome Home"`
 - `headline` (string, required) — Bold headline, 3–6 words. Example: `"Simple Ingredients. Timeless Flavors."`
 - `subhead` (string, required) — 1–2 sentences supporting the headline.
@@ -149,6 +155,7 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 - `imageAlt` (string, required) — Accessibility alt text for the hero image. Derived from the chosen hero image's description but not copied verbatim.
 
 ##### `menuHighlights`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"From the Hearth"`
 - `items` (array, required) — **Exactly 3 elements.** Each represents a featured dish on the homepage.
 
@@ -162,6 +169,7 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
   - `link` (string, required) — **IMMUTABLE. Must always be `"/menu"`.**
 
 ##### `menuPage`
+
 - `title` (string, required) — Page title. Example: `"Our Menu"`
 - `subtitle` (string, required) — 1 short sentence. Example: `"Seasonal dishes inspired by the harvest."`
 - `categories` (array, required) — **2–4 elements.** Each represents a section of the menu.
@@ -178,32 +186,39 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 ##### `navigation` — exactly 5 elements, in this exact order
 
 Each element has:
+
 - `label` (string, required) — Display text. Customizable. Title case preferred. 1–3 words.
 - `path` (string, required) — **IMMUTABLE route value. Do not change.**
 - `isCtaButton` (boolean, optional) — Only present on the last element. Must be `true`.
 
 **Element 0:**
+
 - `path`: `"/"` (immutable)
 - `label`: Home page link (e.g., `"Home"`, `"Welcome"`)
 
 **Element 1:**
+
 - `path`: `"/menu"` (immutable)
 - `label`: Menu page link (e.g., `"Menu"`, `"Our Food"`)
 
 **Element 2:**
+
 - `path`: `"/story"` (immutable)
 - `label`: Story/about page link (e.g., `"Our Story"`, `"About"`)
 
 **Element 3:**
+
 - `path`: `"/gallery"` (immutable)
 - `label`: Gallery page link (e.g., `"Gallery"`, `"Photos"`)
 
 **Element 4:**
+
 - `path`: `"/reservations"` (immutable)
 - `isCtaButton`: `true` (immutable)
 - `label`: Reservation CTA (e.g., `"Reservations"`, `"Book a Table"`)
 
 ##### `reservations`
+
 - `title` (string, required) — Page title. Example: `"Save a Seat"`
 - `subtitle` (string, required) — 1–2 sentences. Example: `"We'd love to host you. For parties larger than 6, please call us directly."`
 - `form` (object, required):
@@ -220,10 +235,12 @@ Each element has:
 - `disclaimer` (string, required) — Must start with `"*"`. Example: `"*Reservations are held for 15 minutes."`
 
 ##### `seo`
+
 - `title` (string, required) — Page title for search engines. Format: `"[Business Name] | [Tagline or Description]"`. Example: `"The Rustic Table | Heirloom Recipes & Local Ingredients"`
 - `description` (string, required) — 1–2 sentence SEO description.
 
 ##### `storyPage`
+
 - `title` (string, required) — Page title. Example: `"Our Story"`
 - `quote` (string, required) — 1 sentence founding quote or philosophy. Example: `"It started with a simple idea: good food takes time, and it tastes better when shared."`
 - `rootedInTradition` (object, required):
@@ -243,15 +260,17 @@ Each element has:
 ##### `socials` — 1 to 4 elements
 
 Each element is an object representing a social media presence:
+
 - `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"TikTok"`, `"X"`, `"YouTube"`, `"LinkedIn"`. Only include platforms relevant to the business.
 - `url` (string, required) — Full URL to the social media profile. Format: `"https://[platform].com/[handle]"`. Example: `"https://instagram.com/artisanhearth"`
 
 **Example:**
+
 ```ts
 socials: [
-  { platform: "Instagram", url: "https://instagram.com/artisanhearth" },
-  { platform: "Facebook", url: "https://facebook.com/artisanhearth" },
-]
+  { platform: 'Instagram', url: 'https://instagram.com/artisanhearth' },
+  { platform: 'Facebook', url: 'https://facebook.com/artisanhearth' },
+];
 ```
 
 ##### `staticAssets.images`
@@ -267,6 +286,7 @@ socials: [
 ---
 
 #### Export
+
 ```ts
 export const siteContent = { ...siteText, ...siteAssets };
 ```
@@ -313,6 +333,7 @@ export const siteContent = { ...siteText, ...siteAssets };
 ### OUTPUT FILE STRUCTURE
 
 The generated `content.ts` must follow this exact order:
+
 ```ts
 const siteText = {
   // ... all siteText content

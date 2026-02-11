@@ -931,6 +931,9 @@ export class WorkbenchStore {
                 // Populate editor file tree from DB snapshot (no upload)
                 await this.#loadSnapshotIntoFileStore();
 
+                // Ensure console interceptor is present in sandbox (critical for reconnection case)
+                await this.#ensureConsoleInterceptorInSandbox(provider);
+
                 // Register preview URLs so the iframe picks them up
                 for (const [port, url] of previewUrls) {
                   this.#previewsStore.registerPreview(port, url, 'vercel');
@@ -1446,6 +1449,57 @@ export class WorkbenchStore {
       logger.info('Sandbox recreation complete, dev server is ready');
     } finally {
       this.#isRecreating = false;
+    }
+  }
+
+  /**
+   * Ensure console interceptor is present in sandbox HTML files.
+   * Called after reconnection when files aren't re-uploaded.
+   *
+   * @param provider - Sandbox provider to check/update files in
+   */
+  async #ensureConsoleInterceptorInSandbox(provider: SandboxProvider): Promise<void> {
+    try {
+      logger.info('[ensureConsoleInterceptorInSandbox] Checking for console interceptor...');
+
+      const htmlFiles = ['index.html', 'index.htm', '404.html'];
+
+      for (const fileName of htmlFiles) {
+        try {
+          // Read file from sandbox
+          const content = await provider.readFile(fileName);
+
+          if (!content) {
+            continue; // File doesn't exist
+          }
+
+          // Check if it's HTML and missing interceptor
+          const { hasConsoleInterceptor, injectConsoleInterceptor } =
+            await import('~/lib/utils/inject-console-interceptor');
+
+          if (content.includes('<html') && !hasConsoleInterceptor(content)) {
+            logger.info('[ensureConsoleInterceptorInSandbox] Injecting interceptor into:', fileName);
+
+            // Inject interceptor
+            const patched = injectConsoleInterceptor(content);
+
+            // Write back to sandbox
+            await provider.writeFile(fileName, patched);
+
+            logger.info('[ensureConsoleInterceptorInSandbox] Successfully injected into:', fileName);
+          } else {
+            logger.debug('[ensureConsoleInterceptorInSandbox] Interceptor already present in:', fileName);
+          }
+        } catch (fileError) {
+          logger.warn(`[ensureConsoleInterceptorInSandbox] Failed to check ${fileName}:`, fileError);
+
+          // Continue with next file
+        }
+      }
+    } catch (error) {
+      logger.error('[ensureConsoleInterceptorInSandbox] Failed:', error);
+
+      // Don't throw - this is a nice-to-have feature, shouldn't break reconnection
     }
   }
 

@@ -945,10 +945,23 @@ export class FilesStore {
       this.#ensureParentFolders(relativePath);
 
       /*
+       * 1.5. Ensure console interceptor is present in HTML files
+       * This catches cases where LLM edits might overwrite the interceptor
+       */
+      let finalContent = content;
+
+      if (!isBinary && typeof content === 'string') {
+        const { ensureConsoleInterceptor } = await import('~/lib/utils/ensure-console-interceptor');
+        finalContent = ensureConsoleInterceptor(relativePath, content);
+      }
+
+      /*
        * 2. Update File State Immediately (Optimistic Store Update)
        * This allows the UI to reflect changes instantly without waiting for FS
        */
-      const contentStr = isBinary ? Buffer.from(content).toString('base64') : (content as string);
+      const contentStr = isBinary
+        ? Buffer.from(finalContent as Uint8Array).toString('base64')
+        : (finalContent as string);
 
       this.files.setKey(relativePath, {
         type: 'file',
@@ -960,7 +973,7 @@ export class FilesStore {
       this.#modifiedFiles.set(relativePath, contentStr);
 
       // 3. Queue for Cloud Sync (Batched)
-      const syncContent = isBinary ? contentStr : (content as string) || ' ';
+      const syncContent = isBinary ? contentStr : (finalContent as string) || ' ';
 
       if (this.#fileSyncManager) {
         logger.info(`[FilesStore:${this.#instanceId}] Queuing write for ${relativePath}`, {
@@ -989,9 +1002,9 @@ export class FilesStore {
           this.markRecentlySaved(relativePath, 2000);
 
           if (isBinary) {
-            await webcontainer.fs.writeFile(relativePath, Buffer.from(content));
+            await webcontainer.fs.writeFile(relativePath, Buffer.from(finalContent as Uint8Array));
           } else {
-            const contentToWrite = (content as string).length === 0 ? ' ' : content;
+            const contentToWrite = (finalContent as string).length === 0 ? ' ' : (finalContent as string);
             await webcontainer.fs.writeFile(relativePath, contentToWrite);
           }
         } catch (err) {
