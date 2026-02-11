@@ -17,6 +17,7 @@ import { extractRelativePath } from '~/utils/diff';
 import { description } from '~/lib/persistence';
 import Cookies from 'js-cookie';
 import { createSampler } from '~/utils/sampler';
+import { debounce } from '~/utils/debounce';
 import type { ActionAlert, DeployAlert, SupabaseAlert } from '~/types/actions';
 import { createScopedLogger } from '~/utils/logger';
 import type { SandboxProvider, SandboxProviderType } from '~/lib/sandbox/types';
@@ -325,6 +326,73 @@ export class WorkbenchStore {
   }
 
   /**
+   * Save current file state as snapshot to Supabase.
+   * Called after files are synced to sandbox to ensure persistence.
+   */
+  async #saveFileSnapshot(): Promise<void> {
+    const projectId = this.#currentProjectId;
+
+    if (!projectId) {
+      return;
+    }
+
+    // Don't save if build has errors
+    if (this.#lastBuildStatus === 'error') {
+      logger.debug('Skipping file snapshot save - build has errors');
+      return;
+    }
+
+    try {
+      const filesMap = this.#filesStore.files.get();
+      const fileEntries = Object.entries(filesMap);
+
+      if (fileEntries.length === 0) {
+        return;
+      }
+
+      // Convert file store format to snapshot format
+      const snapshotFiles: FileMap = {};
+
+      for (const [filePath, dirent] of fileEntries) {
+        if (!dirent) {
+          continue;
+        }
+
+        if (dirent.type === 'folder') {
+          snapshotFiles[filePath] = { type: 'folder' };
+        } else if (dirent.type === 'file') {
+          snapshotFiles[filePath] = {
+            type: 'file',
+            content: dirent.content,
+            isBinary: dirent.isBinary,
+          };
+        }
+      }
+
+      // Import here to avoid circular dependency
+      const { setServerSnapshot } = await import('~/lib/persistence/db');
+
+      await setServerSnapshot(projectId, {
+        chatIndex: '', // Files-only snapshot, no chat index
+        files: snapshotFiles,
+      });
+
+      logger.debug('File snapshot saved to Supabase after sync', {
+        projectId,
+        fileCount: fileEntries.length,
+      });
+    } catch (error) {
+      // Don't throw - this is a background save, failure shouldn't break the flow
+      logger.warn('Failed to save file snapshot', { error, projectId: this.#currentProjectId });
+    }
+  }
+
+  // Debounced version for frequent file changes (5 second debounce)
+  #debouncedSaveFileSnapshot = debounce(() => {
+    this.#saveFileSnapshot();
+  }, 5000);
+
+  /**
    * Initialize the sandbox provider for the current project.
    * This wires up the provider to FilesStore (via FileSyncManager) and PreviewsStore.
    *
@@ -386,6 +454,9 @@ export class WorkbenchStore {
         onSyncSuccess: (_paths) => {
           // Signal Preview.tsx to reload iframe after files synced
           this.vercelPreviewRefreshSignal.set(Date.now());
+
+          // Debounced save to Supabase - ensures files persist for next session
+          this.#debouncedSaveFileSnapshot();
         },
         onSyncFailure: (paths, error) => {
           const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
@@ -656,6 +727,9 @@ export class WorkbenchStore {
                 debounceMs: 300,
                 onSyncSuccess: (_paths) => {
                   this.vercelPreviewRefreshSignal.set(Date.now());
+
+                  // Debounced save to Supabase - ensures files persist for next session
+                  this.#debouncedSaveFileSnapshot();
                 },
                 onSyncFailure: (paths, error) => {
                   const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
@@ -772,6 +846,9 @@ export class WorkbenchStore {
             onSyncSuccess: (_paths) => {
               // Signal Preview.tsx to reload iframe after files synced
               this.vercelPreviewRefreshSignal.set(Date.now());
+
+              // Debounced save to Supabase - ensures files persist for next session
+              this.#debouncedSaveFileSnapshot();
             },
             onSyncFailure: async (paths, error) => {
               const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
