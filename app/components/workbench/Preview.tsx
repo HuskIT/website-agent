@@ -103,6 +103,42 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const [isReloading, setIsReloading] = useState(false);
   const scrollPositionRef = useRef({ x: 0, y: 0 });
 
+  // Listen for console messages from preview iframe (HuskIT Console Interceptor)
+  useEffect(() => {
+    const handleConsoleMessage = (event: MessageEvent) => {
+      // Validate message type (dedicated channel)
+      if (event.data?.type !== 'huskit:preview-console') {
+        return;
+      }
+
+      const { level, message, autoError } = event.data;
+
+      console.log(`[Preview] Captured ${level} from iframe:`, message);
+
+      // Auto-send errors immediately to LLM (via action alert)
+      if (autoError && level === 'error') {
+        // Throttle alerts - only show if no alert currently active
+        const currentAlert = workbenchStore.actionAlert.get();
+
+        if (!currentAlert) {
+          workbenchStore.actionAlert.set({
+            type: 'error',
+            title: 'Runtime Error in Preview',
+            description: 'An error occurred in the generated website. Send to HuskIT AI to fix?',
+            content: message,
+            source: 'preview',
+          });
+        }
+      }
+    };
+
+    window.addEventListener('message', handleConsoleMessage);
+
+    return () => {
+      window.removeEventListener('message', handleConsoleMessage);
+    };
+  }, []);
+
   useEffect(() => {
     if (!activePreview) {
       setIframeUrl(undefined);

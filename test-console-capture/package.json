@@ -1,0 +1,11 @@
+{
+  "name": "console-capture-test",
+  "version": "1.0.0",
+  "description": "Test harness for validating iframe console capture via postMessage",
+  "scripts": {
+    "start": "npx http-server -p 3333 -o parent-test.html"
+  },
+  "keywords": ["console", "iframe", "postMessage", "test"],
+  "author": "",
+  "license": "MIT"
+}

@@ -24,6 +24,7 @@ import type { SandboxProvider, SandboxProviderType } from '~/lib/sandbox/types';
 import { createSandboxProvider, resolveProviderType } from '~/lib/sandbox';
 import { FileSyncManager } from '~/lib/sandbox/file-sync';
 import { TimeoutManager, type TimeoutManagerConfig } from '~/lib/sandbox/timeout-manager';
+import { injectConsoleInterceptor } from '~/lib/utils/inject-console-interceptor';
 
 const { saveAs } = fileSaver;
 const logger = createScopedLogger('WorkbenchStore');
@@ -1857,11 +1858,19 @@ export class WorkbenchStore {
               };
             } else {
               // Text files: content is UTF-8 string, send as utf8 (schema expects 'utf8' not 'utf-8')
+              let content = fileData.content;
+
+              // Inject console interceptor into HTML files for error capture
+              if (filePath.match(/\.(html|htm)$/i) && content.includes('<html')) {
+                content = injectConsoleInterceptor(content);
+                logger.debug('[restoreFromDatabaseSnapshot] Injected console interceptor into:', filePath);
+              }
+
               return {
                 path: filePath,
-                content: fileData.content,
+                content,
                 encoding: 'utf8' as const,
-                size: new TextEncoder().encode(fileData.content).length,
+                size: new TextEncoder().encode(content).length,
               };
             }
           });

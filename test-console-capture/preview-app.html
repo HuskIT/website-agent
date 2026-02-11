@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Preview App (Simulates Generated Website)</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #333; }
+    button {
+      background: #0066cc;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #0052a3; }
+    .error-btn { background: #dc3545; }
+    .error-btn:hover { background: #c82333; }
+    .warn-btn { background: #ffc107; color: #000; }
+    .warn-btn:hover { background: #e0a800; }
+    #output {
+      background: white;
+      border: 1px solid #ddd;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 4px;
+      min-height: 100px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Console Capture Test App</h1>
+  <p>This simulates a generated website running in the preview iframe.</p>
+
+  <div>
+    <button onclick="testLog()">console.log()</button>
+    <button onclick="testWarn()" class="warn-btn">console.warn()</button>
+    <button onclick="testError()" class="error-btn">console.error()</button>
+    <button onclick="throwError()" class="error-btn">Throw Error</button>
+    <button onclick="rejectPromise()" class="error-btn">Promise Rejection</button>
+  </div>
+
+  <div id="output">
+    <strong>Output will appear here and in parent window...</strong>
+  </div>
+
+  <!-- CONSOLE INTERCEPTOR - This gets injected into generated apps -->
+  <script>
+    (function() {
+      console.log('[Console Interceptor] Installing...');
+
+      const originalConsole = {
+        log: console.log.bind(console),
+        error: console.error.bind(console),
+        warn: console.warn.bind(console),
+        info: console.info.bind(console)
+      };
+
+      function sendToParent(level, args) {
+        const message = args.map(arg => {
+          if (arg instanceof Error) {
+            return `${arg.name}: ${arg.message}\n${arg.stack}`;
+          }
+          if (typeof arg === 'object' && arg !== null) {
+            try {
+              return JSON.stringify(arg, null, 2);
+            } catch {
+              return String(arg);
+            }
+          }
+          return String(arg);
+        }).join(' ');
+
+        const payload = {
+          type: 'preview-console',
+          level: level,
+          message: message,
+          timestamp: Date.now(),
+          url: window.location.href
+        };
+
+        // Send to parent window
+        window.parent.postMessage(payload, '*');
+
+        // Also log locally for debugging
+        originalConsole.log(`[Intercepted ${level}]`, message);
+      }
+
+      // Override console methods
+      console.log = function(...args) {
+        originalConsole.log.apply(console, args);
+        sendToParent('log', args);
+      };
+
+      console.error = function(...args) {
+        originalConsole.error.apply(console, args);
+        sendToParent('error', args);
+      };
+
+      console.warn = function(...args) {
+        originalConsole.warn.apply(console, args);
+        sendToParent('warn', args);
+      };
+
+      console.info = function(...args) {
+        originalConsole.info.apply(console, args);
+        sendToParent('info', args);
+      };
+
+      // Capture uncaught errors
+      window.addEventListener('error', (event) => {
+        sendToParent('error', [
+          `Uncaught Error: ${event.message}`,
+          `at ${event.filename}:${event.lineno}:${event.colno}`
+        ]);
+      });
+
+      // Capture unhandled promise rejections
+      window.addEventListener('unhandledrejection', (event) => {
+        sendToParent('error', ['Unhandled Promise Rejection:', event.reason]);
+      });
+
+      originalConsole.log('[Console Interceptor] ✅ Installed successfully');
+    })();
+  </script>
+
+  <!-- TEST FUNCTIONS -->
+  <script>
+    function appendOutput(text, color = '#333') {
+      const output = document.getElementById('output');
+      const line = document.createElement('div');
+      line.style.color = color;
+      line.style.marginBottom = '5px';
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+      output.appendChild(line);
+    }
+
+    function testLog() {
+      const msg = 'This is a console.log message';
+      console.log(msg);
+      appendOutput(msg, '#0066cc');
+    }
+
+    function testWarn() {
+      const msg = 'This is a console.warn message';
+      console.warn(msg);
+      appendOutput(msg, '#ff9800');
+    }
+
+    function testError() {
+      const msg = 'This is a console.error message';
+      console.error(msg);
+      appendOutput(msg, '#dc3545');
+    }
+
+    function throwError() {
+      const msg = 'About to throw an error...';
+      appendOutput(msg, '#dc3545');
+      setTimeout(() => {
+        throw new Error('This is an uncaught error!');
+      }, 100);
+    }
+
+    function rejectPromise() {
+      const msg = 'About to reject a promise...';
+      appendOutput(msg, '#dc3545');
+      setTimeout(() => {
+        Promise.reject(new Error('This is an unhandled promise rejection!'));
+      }, 100);
+    }
+
+    // Auto-run some tests on load
+    setTimeout(() => {
+      console.log('🚀 Preview app loaded successfully');
+      console.info('Ready to test console capture');
+    }, 500);
+  </script>
+</body>
+</html>

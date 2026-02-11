@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Console Capture Test - Parent Window (Simulates Preview.tsx)</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1e1e1e;
+      color: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #2d2d2d;
+      padding: 15px 20px;
+      border-bottom: 1px solid #404040;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .subtitle {
+      color: #888;
+      font-size: 13px;
+    }
+
+    .container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .preview-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #404040;
+    }
+
+    .preview-header {
+      background: #252525;
+      padding: 10px 15px;
+      border-bottom: 1px solid #404040;
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    iframe {
+      flex: 1;
+      border: none;
+      background: white;
+    }
+
+    .console-panel {
+      width: 400px;
+      display: flex;
+      flex-direction: column;
+      background: #1e1e1e;
+    }
+
+    .console-header {
+      background: #252525;
+      padding: 10px 15px;
+      border-bottom: 1px solid #404040;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .console-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .console-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .console-actions button {
+      background: #404040;
+      color: #fff;
+      border: none;
+      padding: 4px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .console-actions button:hover {
+      background: #505050;
+    }
+
+    .console-actions .send-llm {
+      background: #0066cc;
+    }
+
+    .console-actions .send-llm:hover {
+      background: #0052a3;
+    }
+
+    .console-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .console-log {
+      padding: 4px 8px;
+      margin: 2px 0;
+      border-left: 3px solid transparent;
+      word-wrap: break-word;
+    }
+
+    .console-log.log {
+      color: #ccc;
+      border-left-color: #888;
+    }
+
+    .console-log.info {
+      color: #4fc3f7;
+      border-left-color: #4fc3f7;
+    }
+
+    .console-log.warn {
+      color: #ffb74d;
+      border-left-color: #ffb74d;
+      background: rgba(255, 183, 77, 0.05);
+    }
+
+    .console-log.error {
+      color: #f48771;
+      border-left-color: #f48771;
+      background: rgba(244, 135, 113, 0.05);
+    }
+
+    .console-timestamp {
+      color: #666;
+      font-size: 10px;
+      margin-right: 8px;
+    }
+
+    .stats {
+      background: #252525;
+      padding: 8px 15px;
+      border-top: 1px solid #404040;
+      font-size: 11px;
+      color: #888;
+      display: flex;
+      gap: 20px;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-value {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .stat-value.error {
+      color: #f48771;
+    }
+
+    .stat-value.warn {
+      color: #ffb74d;
+    }
+
+    .empty-state {
+      color: #666;
+      text-align: center;
+      padding: 40px 20px;
+      font-size: 13px;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+      background: #4caf50;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #4caf50;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease-out;
+      z-index: 1000;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧪 Console Capture Test Harness</h1>
+    <p class="subtitle">Simulates Preview.tsx receiving console logs from iframe via postMessage</p>
+  </header>
+
+  <div class="container">
+    <!-- Preview Panel (Left) -->
+    <div class="preview-panel">
+      <div class="preview-header">
+        <span class="status-indicator"></span>
+        Preview Iframe
+      </div>
+      <iframe id="preview-iframe" src="preview-app.html"></iframe>
+    </div>
+
+    <!-- Console Panel (Right) -->
+    <div class="console-panel">
+      <div class="console-header">
+        <span class="console-title">📋 Console (Captured from Preview)</span>
+        <div class="console-actions">
+          <button onclick="clearConsole()">Clear</button>
+          <button onclick="exportLogs()">Export</button>
+          <button onclick="sendToLLM()" class="send-llm">Send Errors to LLM</button>
+        </div>
+      </div>
+
+      <div class="console-body" id="console-body">
+        <div class="empty-state">
+          Waiting for console messages from preview iframe...<br>
+          <small>Try clicking buttons in the preview to generate logs</small>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          Total: <span class="stat-value" id="total-count">0</span>
+        </div>
+        <div class="stat">
+          Errors: <span class="stat-value error" id="error-count">0</span>
+        </div>
+        <div class="stat">
+          Warnings: <span class="stat-value warn" id="warn-count">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const consoleLogs = [];
+    let errorCount = 0;
+    let warnCount = 0;
+
+    // Listen for postMessage from iframe
+    window.addEventListener('message', (event) => {
+      // Validate message type
+      if (event.data?.type !== 'preview-console') {
+        return;
+      }
+
+      const { level, message, timestamp } = event.data;
+
+      // Store log
+      consoleLogs.push({ level, message, timestamp });
+
+      // Update counts
+      if (level === 'error') errorCount++;
+      if (level === 'warn') warnCount++;
+
+      // Update UI
+      appendConsoleLog(level, message, timestamp);
+      updateStats();
+
+      // Auto-notification for errors
+      if (level === 'error') {
+        showToast(`Error detected: ${message.substring(0, 50)}...`);
+      }
+    });
+
+    function appendConsoleLog(level, message, timestamp) {
+      const consoleBody = document.getElementById('console-body');
+
+      // Remove empty state
+      if (consoleBody.querySelector('.empty-state')) {
+        consoleBody.innerHTML = '';
+      }
+
+      const logDiv = document.createElement('div');
+      logDiv.className = `console-log ${level}`;
+
+      const time = new Date(timestamp).toLocaleTimeString();
+      logDiv.innerHTML = `
+        <span class="console-timestamp">${time}</span>
+        <strong>[${level.toUpperCase()}]</strong> ${escapeHtml(message)}
+      `;
+
+      consoleBody.appendChild(logDiv);
+
+      // Auto-scroll to bottom
+      consoleBody.scrollTop = consoleBody.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('total-count').textContent = consoleLogs.length;
+      document.getElementById('error-count').textContent = errorCount;
+      document.getElementById('warn-count').textContent = warnCount;
+    }
+
+    function clearConsole() {
+      const consoleBody = document.getElementById('console-body');
+      consoleBody.innerHTML = '<div class="empty-state">Console cleared</div>';
+      consoleLogs.length = 0;
+      errorCount = 0;
+      warnCount = 0;
+      updateStats();
+    }
+
+    function exportLogs() {
+      const text = consoleLogs.map(log => {
+        const time = new Date(log.timestamp).toISOString();
+        return `[${time}] [${log.level.toUpperCase()}] ${log.message}`;
+      }).join('\n');
+
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `console-logs-${Date.now()}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      showToast('Logs exported successfully!');
+    }
+
+    function sendToLLM() {
+      const errors = consoleLogs.filter(log => log.level === 'error');
+
+      if (errors.length === 0) {
+        showToast('No errors to send', '#ffc107');
+        return;
+      }
+
+      const prompt = `Fix these errors in my code:\n\n${errors.map((e, i) =>
+        `${i + 1}. ${e.message}`
+      ).join('\n\n')}`;
+
+      // Copy to clipboard
+      navigator.clipboard.writeText(prompt).then(() => {
+        showToast(`${errors.length} error(s) copied to clipboard! Paste in chat.`);
+      });
+
+      // In real app, this would send to chat automatically
+      console.log('Would send to LLM:', prompt);
+    }
+
+    function showToast(message, bgColor = '#4caf50') {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.background = bgColor;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Initial message
+    console.log('✅ Parent window ready - listening for console messages from iframe');
+  </script>
+</body>
+</html>
