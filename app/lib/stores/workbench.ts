@@ -2161,7 +2161,7 @@ export class WorkbenchStore {
 
           // Start the command and let it run in background
           provider
-            .runCommand(attempt.cmd, attempt.args, { cwd: '/home/project' })
+            .runCommand(attempt.cmd, attempt.args)
             .then((result) => {
               // Command exited (either success or failure)
               if (result.exitCode !== 0) {
