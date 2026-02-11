@@ -2100,42 +2100,136 @@ export class WorkbenchStore {
       logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
 
       /*
-       * Fire-and-forget: do NOT await – dev servers run indefinitely.
-       * The preview polling in Preview.tsx will detect when the port is ready.
-       * NOTE: Browser console errors (runtime errors) are NOT captured here.
-       * They occur in the iframe and require a different mechanism to capture.
+       * Start the dev server with error handling and retry logic.
+       * Try primary command first, then fallback to alternatives if it fails.
        */
 
       // Set up promise that resolves when dev server is ready
       this.#devServerStarting = true;
 
-      let resolveDevServerReady: () => void;
+      let resolveDevServerReady!: () => void;
       this.#devServerReadyPromise = new Promise((resolve) => {
         resolveDevServerReady = resolve;
       });
 
-      provider.runCommand('npm', devArgs, { cwd: '/home/project' }).catch((error) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
+      // Define command alternatives to try
+      const commandAttempts: Array<{ cmd: string; args: string[]; description: string }> = [
+        { cmd: 'npm', args: devArgs, description: `npm run ${scriptName}${isVite ? ' -- --host' : ''}` },
+      ];
 
-        if (is410) {
-          // Sandbox expired — show notification, user must click Restart (no auto-recreation)
-          logger.info('Dev server: sandbox expired — showing notification');
-          this.actionAlert.set({
-            type: 'warning',
-            title: 'Session Expired',
-            description: 'Your preview session has ended. Click Restart to continue.',
-            content: '',
+      // Add alternative if different script is available
+      if (scriptName === 'dev' && scripts.start) {
+        commandAttempts.push({
+          cmd: 'npm',
+          args: isVite ? ['run', 'start', '--', '--host'] : ['run', 'start'],
+          description: `npm run start${isVite ? ' -- --host' : ''}`,
+        });
+      } else if (scriptName === 'start' && scripts.dev) {
+        commandAttempts.push({
+          cmd: 'npm',
+          args: isVite ? ['run', 'dev', '--', '--host'] : ['run', 'dev'],
+          description: `npm run dev${isVite ? ' -- --host' : ''}`,
+        });
+      }
+
+      logger.debug('[DEBUG #autoStartDevServer] Command attempts:', commandAttempts);
+
+      // Try commands in sequence until one works
+      let lastError: { exitCode: number; stdout: string; stderr: string } | null = null;
+
+      for (const [index, attempt] of commandAttempts.entries()) {
+        try {
+          logger.info(`[autoStartDevServer] Attempting: ${attempt.description}`, {
+            attemptIndex: index,
+            totalAttempts: commandAttempts.length,
           });
-        } else if (!is410) {
-          logger.error('Dev server command failed unexpectedly', { error: msg });
-        }
 
-        // Mark dev server as no longer starting (even on error)
-        this.#devServerStarting = false;
-        resolveDevServerReady!();
-      });
-      logger.debug('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
+          // Start the command and let it run in background
+          provider
+            .runCommand(attempt.cmd, attempt.args, { cwd: '/home/project' })
+            .then((result) => {
+              // Command exited (either success or failure)
+              if (result.exitCode !== 0) {
+                logger.error(`[autoStartDevServer] ${attempt.description} exited with code ${result.exitCode}`, {
+                  exitCode: result.exitCode,
+                  stdout: result.stdout?.substring(0, 500),
+                  stderr: result.stderr?.substring(0, 500),
+                });
+
+                // Show error to user
+                this.actionAlert.set({
+                  type: 'error',
+                  title: 'Dev Server Failed',
+                  description: `${attempt.description} failed to start`,
+                  content: result.stderr || result.stdout || `Exit code: ${result.exitCode}`,
+                });
+              } else {
+                logger.info(`[autoStartDevServer] ${attempt.description} exited normally`);
+              }
+
+              this.#devServerStarting = false;
+              resolveDevServerReady();
+            })
+            .catch((error) => {
+              const msg = error instanceof Error ? error.message : String(error);
+              const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
+
+              if (is410) {
+                logger.info('Dev server: sandbox expired — showing notification');
+                this.actionAlert.set({
+                  type: 'warning',
+                  title: 'Session Expired',
+                  description: 'Your preview session has ended. Click Restart to continue.',
+                  content: '',
+                });
+              } else {
+                logger.error(`[autoStartDevServer] ${attempt.description} failed`, { error: msg });
+                this.actionAlert.set({
+                  type: 'error',
+                  title: 'Dev Server Error',
+                  description: `${attempt.description} encountered an error`,
+                  content: msg,
+                });
+              }
+
+              this.#devServerStarting = false;
+              resolveDevServerReady();
+            });
+
+          logger.debug(`[DEBUG #autoStartDevServer] ${attempt.description} started (fire-and-forget)`);
+
+          // Command started successfully, break the loop
+          break;
+        } catch (error) {
+          // This catch is for errors during the command setup, not execution
+          logger.warn(`[autoStartDevServer] Failed to start ${attempt.description}`, {
+            error: String(error),
+            attemptIndex: index,
+          });
+
+          lastError = {
+            exitCode: -1,
+            stdout: '',
+            stderr: String(error),
+          };
+
+          // If this was the last attempt, show error
+          if (index === commandAttempts.length - 1) {
+            this.actionAlert.set({
+              type: 'error',
+              title: 'Dev Server Failed',
+              description: 'All dev server start commands failed',
+              content: lastError.stderr || 'Unable to start development server',
+            });
+
+            this.#devServerStarting = false;
+            resolveDevServerReady();
+          }
+
+          // Try next command
+          continue;
+        }
+      }
 
       // Poll for dev server readiness
       this.#pollDevServerReady(provider, resolveDevServerReady!);
