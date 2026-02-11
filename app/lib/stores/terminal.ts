@@ -30,16 +30,8 @@ export class TerminalStore {
     // Check if Vercel provider is active
     const provider = workbenchStore.sandboxProvider;
 
-    console.log('[TerminalStore] boltTerminal getter:', {
-      hasProvider: !!provider,
-      providerType: provider?.type,
-      providerStatus: provider?.status,
-      sandboxId: provider?.sandboxId,
-    });
-
     if (provider?.type === 'vercel' && provider.status === 'connected') {
       if (!this.#vercelBoltTerminal) {
-        console.log('[TerminalStore] Creating new VercelShell');
         this.#vercelBoltTerminal = newVercelShellProcess();
         this.#vercelBoltTerminal.setProvider(provider);
       } else {
@@ -47,13 +39,8 @@ export class TerminalStore {
         this.#vercelBoltTerminal.setProvider(provider);
       }
 
-      console.log('[TerminalStore] Returning VercelShell');
-
       return this.#vercelBoltTerminal;
     }
-
-    // Fall back to WebContainer bolt terminal
-    console.log('[TerminalStore] Returning WebContainer BoltShell (fallback)');
 
     return this.#boltTerminal;
   }

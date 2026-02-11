@@ -207,6 +207,31 @@ export class VercelSandboxProvider implements SandboxProvider {
   }
 
   /**
+   * Set up the provider with an existing sandbox that was just restored.
+   * This bypasses all API calls since the restore API already verified everything.
+   */
+  setupFromRestore(
+    config: SandboxConfig,
+    sandboxId: string,
+    previewUrls: Record<number, string>,
+    timeout: number,
+  ): void {
+    this._config = config;
+    this._sandboxId = sandboxId;
+    this._timeoutRemaining = timeout;
+
+    // Set up preview URLs
+    for (const [port, url] of Object.entries(previewUrls)) {
+      const portNum = parseInt(port, 10);
+      this._previewUrls.set(portNum, url);
+      this._previewCallbacks.forEach((cb) => cb(portNum, url));
+    }
+
+    this._startTimeoutTracking();
+    this._setStatus('connected');
+  }
+
+  /**
    * Subscribe to status changes
    */
   onStatusChange(callback: StatusCallback): () => void {

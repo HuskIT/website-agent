@@ -1120,14 +1120,6 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
     }
   };
 
-  console.log('🔄 [Preview Component] Re-rendering with:', {
-    activePreview: !!activePreview,
-    isDeviceModeOn,
-    showDeviceFrameInPreview,
-    selectedWindowSize: selectedWindowSize.name,
-    widthPercent,
-  });
-
   return (
     <div ref={containerRef} className={`w-full h-full flex flex-col relative`}>
       {isPortDropdownOpen && (
@@ -1458,27 +1450,8 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
               alignItems: 'center',
             }}
           >
-            {(() => {
-              console.log('🔍 [Preview] Checking activePreview:', {
-                hasActivePreview: !!activePreview,
-                activePreviewUrl: activePreview?.baseUrl,
-                isDeviceModeOn,
-                showDeviceFrameInPreview,
-              });
-              return null;
-            })()}
             {activePreview ? (
               <>
-                {(() => {
-                  console.log('🎨 [Device Selector] Rendering with:', {
-                    isDeviceModeOn,
-                    showDeviceFrameInPreview,
-                    widthPercent,
-                    selectedWindowSize: selectedWindowSize.name,
-                    willShowFrame: isDeviceModeOn && showDeviceFrameInPreview,
-                  });
-                  return null;
-                })()}
                 {/* Waiting overlay – shown while polling for Vercel dev server */}
                 {!serverReady && (
                   <div

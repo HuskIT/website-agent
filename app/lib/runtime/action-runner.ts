@@ -10,7 +10,7 @@ import type { VercelShell } from '~/lib/sandbox/vercel-terminal';
 import { applyEdit, groupEditsByFile, parseEditBlocks, sortEditsForApplication } from './edit-parser';
 import { ENABLE_AST_MATCHING, getAstContext } from './ast-context';
 import type { SandboxProvider } from '~/lib/sandbox/types';
-import { getProviderInstance } from '~/lib/stores/sandbox';
+import { getProviderInstance, waitForProviderInstance } from '~/lib/stores/sandbox';
 
 const logger = createScopedLogger('ActionRunner');
 
@@ -21,6 +21,7 @@ export type BaseActionState = BoltAction & {
   abort: () => void;
   executed: boolean;
   abortSignal: AbortSignal;
+  output?: string; // Captured stdout/stderr from shell commands
 };
 
 export type FailedActionState = BoltAction &
@@ -31,7 +32,7 @@ export type FailedActionState = BoltAction &
 
 export type ActionState = BaseActionState | FailedActionState;
 
-type BaseActionUpdate = Partial<Pick<BaseActionState, 'status' | 'abort' | 'executed'>>;
+type BaseActionUpdate = Partial<Pick<BaseActionState, 'status' | 'abort' | 'executed' | 'output'>>;
 
 export type ActionStateUpdate =
   | BaseActionUpdate
@@ -73,6 +74,7 @@ export class ActionRunner {
   #currentExecutionPromise: Promise<void> = Promise.resolve();
   #shellTerminal: () => BoltShell | VercelShell;
   #onMarkRecentlySaved?: (relativePath: string, timeout?: number) => void;
+  #onSandboxExpired?: () => Promise<void>;
   runnerId = atom<string>(`${Date.now()}`);
   actions: ActionsMap = map({});
   onAlert?: (alert: ActionAlert) => void;
@@ -87,6 +89,7 @@ export class ActionRunner {
     onSupabaseAlert?: (alert: SupabaseAlert) => void,
     onDeployAlert?: (alert: DeployAlert) => void,
     onMarkRecentlySaved?: (relativePath: string, timeout?: number) => void,
+    onSandboxExpired?: () => Promise<void>,
   ) {
     this.#webcontainer = webcontainerPromise;
     this.#shellTerminal = getShellTerminal;
@@ -94,16 +97,38 @@ export class ActionRunner {
     this.onSupabaseAlert = onSupabaseAlert;
     this.onDeployAlert = onDeployAlert;
     this.#onMarkRecentlySaved = onMarkRecentlySaved;
+    this.#onSandboxExpired = onSandboxExpired;
   }
 
   /**
    * Get the active SandboxProvider if available and connected, otherwise null.
    * Dynamically checks provider status to handle async connection timing.
+   * Waits for provider initialization if needed.
    */
   async #getProvider(): Promise<SandboxProvider | null> {
-    const provider = getProviderInstance();
+    let provider = getProviderInstance();
 
-    // Check if provider exists and is a Vercel Sandbox
+    /*
+     * If no provider exists yet, wait for it to be initialized
+     * This handles the case where artifacts are created before sandbox is ready
+     */
+    if (!provider) {
+      console.log('[ActionRunner] No provider instance yet, waiting for initialization...');
+      provider = await waitForProviderInstance(30000); // Wait up to 30s
+
+      if (provider) {
+        console.log('[ActionRunner] Provider initialized:', {
+          type: provider.type,
+          status: provider.status,
+          sandboxId: provider.sandboxId,
+        });
+      } else {
+        console.warn('[ActionRunner] Provider initialization timed out');
+        return null;
+      }
+    }
+
+    // Check if provider is a Vercel Sandbox
     if (provider && provider.type === 'vercel') {
       // If connected, return immediately
       if (provider.status === 'connected') {
@@ -122,7 +147,7 @@ export class ActionRunner {
               reject(new Error('Provider connection timeout'));
             }, 5000);
 
-            const cleanup = provider.onStatusChange((status) => {
+            const cleanup = provider!.onStatusChange((status) => {
               if (status === 'connected') {
                 cleanup();
                 clearTimeout(timeout);
@@ -147,7 +172,7 @@ export class ActionRunner {
       }
     }
 
-    return null;
+    return provider?.type === 'vercel' ? provider : null;
   }
 
   /**
@@ -203,6 +228,9 @@ export class ActionRunner {
       return; // No return value here
     }
 
+    // Manage streaming mode for file sync to prevent API spam
+    this.#manageFileSyncStreaming(isStreaming);
+
     this.#updateAction(actionId, { ...action, ...data.action, executed: !isStreaming });
 
     this.#currentExecutionPromise = this.#currentExecutionPromise
@@ -218,6 +246,45 @@ export class ActionRunner {
     return;
   }
 
+  /**
+   * Manage FileSyncManager streaming mode to prevent API spam during LLM streaming.
+   * When streaming starts, delay file syncs. When streaming ends, flush all pending files.
+   */
+  #manageFileSyncStreaming(isStreaming: boolean): void {
+    // Dynamic import to avoid circular dependency
+    import('~/lib/stores/workbench')
+      .then(({ workbenchStore }) => {
+        const fileSyncManager = workbenchStore.getFileSyncManager?.();
+
+        if (fileSyncManager) {
+          fileSyncManager.setStreamingMode(isStreaming);
+        }
+      })
+      .catch(() => {
+        // Ignore errors - workbench store might not be available
+      });
+  }
+
+  /**
+   * Flush any pending file syncs before running shell commands.
+   * This ensures files are written before commands that depend on them (e.g., npm install).
+   */
+  async #flushPendingFileSyncs(): Promise<void> {
+    try {
+      const { workbenchStore } = await import('~/lib/stores/workbench');
+      const fileSyncManager = workbenchStore.getFileSyncManager?.();
+
+      if (fileSyncManager) {
+        // Disable streaming mode and flush all pending writes
+        fileSyncManager.setStreamingMode(false);
+        await fileSyncManager.flushWrites();
+        logger.debug('[ActionRunner] Flushed pending file syncs before shell command');
+      }
+    } catch {
+      // Ignore errors - workbench store might not be available
+    }
+  }
+
   async #executeAction(actionId: string, isStreaming: boolean = false) {
     const action = this.actions.get()[actionId];
 
@@ -226,7 +293,7 @@ export class ActionRunner {
     try {
       switch (action.type) {
         case 'shell': {
-          await this.#runShellAction(action);
+          await this.#runShellAction(actionId, action);
           break;
         }
         case 'file': {
@@ -321,41 +388,66 @@ export class ActionRunner {
     }
   }
 
-  async #runShellAction(action: ActionState) {
+  async #runShellAction(actionId: string, action: ActionState) {
     if (action.type !== 'shell') {
       unreachable('Expected shell action');
     }
 
+    /*
+     * Flush any pending file syncs before running shell commands
+     * This ensures files are written before commands that depend on them (e.g., npm install)
+     */
+    await this.#flushPendingFileSyncs();
+
     // Try to use provider abstraction if available (Vercel Sandbox)
     const provider = await this.#getProvider();
 
-    // Debug logging for provider routing
-    console.log('[ActionRunner] Shell action routing check', {
-      hasProvider: !!provider,
-      providerType: provider?.type,
-      providerStatus: provider?.status,
-      command: action.content.substring(0, 50),
-      timestamp: Date.now(),
-    });
+    // Use provider (Vercel Sandbox) if available and connected
+    if (provider) {
+      if (provider.status === 'connected') {
+        logger.info(`[ActionRunner] Running shell command via Vercel: ${action.content.substring(0, 50)}...`);
 
-    if (provider && provider.status === 'connected') {
-      console.log(`[ActionRunner] 🚀 Running shell command via Vercel Sandbox: ${action.content.substring(0, 50)}...`);
+        // Pre-validate command for common issues (skip for Vercel - it handles this better)
+        const validationResult = await this.#validateShellCommand(action.content);
 
-      // Pre-validate command for common issues (skip for Vercel - it handles this better)
-      const validationResult = await this.#validateShellCommand(action.content);
+        if (validationResult.shouldModify && validationResult.modifiedCommand) {
+          logger.debug(`Modified command: ${action.content} -> ${validationResult.modifiedCommand}`);
+          action.content = validationResult.modifiedCommand;
+        }
 
-      if (validationResult.shouldModify && validationResult.modifiedCommand) {
-        logger.debug(`Modified command: ${action.content} -> ${validationResult.modifiedCommand}`);
-        action.content = validationResult.modifiedCommand;
-      }
-
-      try {
         // Parse command for provider execution
         const { cmd, args } = this.#parseCommand(action.content);
 
-        const result = await provider.runCommand(cmd, args);
+        let result;
+
+        try {
+          result = await provider.runCommand(cmd, args);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const is410Error =
+            errorMessage.includes('410') ||
+            errorMessage.includes('expired') ||
+            errorMessage.includes('SANDBOX_EXPIRED');
+
+          if (is410Error && this.#onSandboxExpired) {
+            logger.warn('Sandbox expired during command, triggering auto-recovery', { cmd });
+            await this.#onSandboxExpired();
+
+            // After recovery, retry the command once
+            logger.info('Retrying command after sandbox recovery', { cmd });
+            result = await provider.runCommand(cmd, args);
+          } else {
+            throw error;
+          }
+        }
 
         logger.debug(`Provider shell response: [exit code:${result.exitCode}]`);
+
+        // Capture output for both success and failure
+        const output = result.stdout || result.stderr || '';
+
+        // Store output in action state for LLM context
+        this.#updateAction(actionId, { output });
 
         if (result.exitCode !== 0) {
           const enhancedError = this.#createEnhancedShellError(
@@ -367,19 +459,18 @@ export class ActionRunner {
         }
 
         return;
-      } catch (error) {
-        if (error instanceof ActionCommandError) {
-          throw error;
-        }
-
-        logger.warn('Provider command failed, falling back to WebContainer', error);
-
-        // Fall through to WebContainer
+      } else {
+        // Provider exists but is not connected - fail with clear error
+        logger.error(`[ActionRunner] Provider exists but is not connected (status: ${provider.status})`);
+        throw new ActionCommandError(
+          'Sandbox not connected',
+          `Cannot execute command: ${action.content.substring(0, 50)}...\n\nThe sandbox is not connected (status: ${provider.status}). Please wait for the sandbox to reconnect or refresh the page.`,
+        );
       }
     }
 
-    // Fallback to WebContainer
-    console.log('[ActionRunner] Falling back to WebContainer for shell command');
+    // WebContainer fallback - only used when no provider is configured
+    logger.info('[ActionRunner] Running shell command via WebContainer (no provider available)');
 
     const shell = this.#shellTerminal();
     await shell.ready();
@@ -401,6 +492,11 @@ export class ActionRunner {
       action.abort();
     });
     logger.debug(`${action.type} Shell Response: [exit code:${resp?.exitCode}]`);
+
+    // Capture output for LLM context
+    if (resp?.output) {
+      this.#updateAction(actionId, { output: resp.output });
+    }
 
     if (resp?.exitCode != 0) {
       const enhancedError = this.#createEnhancedShellError(action.content, resp?.exitCode, resp?.output);

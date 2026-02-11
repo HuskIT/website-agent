@@ -110,6 +110,8 @@ export class WorkbenchStore {
   #recreationCount = 0; // Consecutive auto-recreations without user activity
   #domActivityCleanup: (() => void) | null = null; // DOM listener cleanup
   #activityTrackingStarted = false; // Prevent double-attaching DOM listeners
+  #devServerStarting = false; // Track when dev server is starting up
+  #devServerReadyPromise: Promise<void> | null = null; // Promise that resolves when dev server is ready
 
   // Project state for reconnection
   #currentProjectId: string | null = null;
@@ -260,6 +262,14 @@ export class WorkbenchStore {
       isExpired: state.isExpired,
       warningShown: state.warningShown,
     };
+  }
+
+  /**
+   * Get the FileSyncManager for controlling file sync behavior.
+   * Used by ActionRunner to enable/disable streaming mode.
+   */
+  getFileSyncManager(): FileSyncManager | null {
+    return this.#fileSyncManager;
   }
 
   /**
@@ -555,19 +565,32 @@ export class WorkbenchStore {
               });
               console.log('🚀 Successfully restored from Vercel snapshot:', data.sandboxId);
 
-              // Create provider for the new sandbox
-              const provider = await createSandboxProvider(
-                providerType,
-                {
-                  projectId,
-                  userId,
-                  snapshotId: latestSnapshot.vercel_snapshot_id,
-                  workdir: '/home/project',
-                  timeout: 5 * 60 * 1000,
-                  ports: [3000, 5173],
-                  runtime: 'node22',
-                },
-                { skipConnect: false }, // Connect normally
+              /*
+               * Create provider for the restored sandbox
+               * Use skipConnect: true since the sandbox is already created via restore API
+               */
+              const providerConfig = {
+                projectId,
+                userId,
+                snapshotId: latestSnapshot.vercel_snapshot_id,
+                workdir: '/home/project',
+                timeout: 5 * 60 * 1000,
+                ports: [3000, 5173],
+                runtime: 'node22' as const,
+              };
+              const provider = await createSandboxProvider(providerType, providerConfig, {
+                skipConnect: true, // Skip connect - sandbox already exists
+              });
+
+              /*
+               * Set up the provider with the restored sandbox data
+               * No API call needed - restore API already verified and returned all data
+               */
+              (provider as any).setupFromRestore(
+                providerConfig,
+                data.sandboxId,
+                data.previewUrls,
+                5 * 60 * 1000, // 5 minutes default timeout
               );
 
               this.#sandboxProvider = provider;
@@ -695,7 +718,7 @@ export class WorkbenchStore {
               // Signal Preview.tsx to reload iframe after files synced
               this.vercelPreviewRefreshSignal.set(Date.now());
             },
-            onSyncFailure: (paths, error) => {
+            onSyncFailure: async (paths, error) => {
               const is410 = error.includes('410') || error.includes('SANDBOX_EXPIRED') || error.includes('gone');
 
               if (!is410) {
@@ -703,14 +726,36 @@ export class WorkbenchStore {
                 return;
               }
 
-              // Sandbox is dead — show notification, user must click Restart
-              logger.info('File sync: sandbox expired — showing notification');
-              this.actionAlert.set({
-                type: 'warning',
-                title: 'Session Expired',
-                description: 'Your preview session has ended. Click Restart to continue.',
-                content: '',
-              });
+              // Sandbox is dead — trigger auto-recovery
+              logger.info('File sync: sandbox expired — triggering auto-recovery', { paths });
+
+              if (this.#isRecreating) {
+                logger.warn('Sandbox recreation already in progress, skipping auto-recovery');
+                return;
+              }
+
+              try {
+                this.#isRecreating = true;
+                this.loadingStatus.set('Sandbox session expired. Recreating...');
+                await this.#recreateSandbox();
+                logger.info('Sandbox auto-recovery complete after file sync failure');
+
+                // Retry the failed file sync after recovery
+                if (this.#fileSyncManager) {
+                  logger.debug('Retrying file sync after auto-recovery');
+                  await this.#fileSyncManager.flushWrites();
+                }
+              } catch (recoveryError) {
+                logger.error('Sandbox auto-recovery failed', { error: recoveryError });
+                this.actionAlert.set({
+                  type: 'error',
+                  title: 'Session Recovery Failed',
+                  description: 'Could not restore your session. Please refresh the page to continue.',
+                  content: '',
+                });
+              } finally {
+                this.#isRecreating = false;
+              }
             },
           });
           this.#fileSyncManager.setProvider(provider);
@@ -1091,13 +1136,14 @@ export class WorkbenchStore {
     opts?: { cwd?: string; env?: Record<string, string>; timeout?: number },
     maxRetries = 1,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const provider = this.#sandboxProvider;
-
-    if (!provider) {
-      throw new Error('No sandbox provider available');
-    }
-
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Get provider fresh each attempt (it may change after recreation)
+      const provider = this.#sandboxProvider;
+
+      if (!provider) {
+        throw new Error('No sandbox provider available');
+      }
+
       try {
         return await provider.runCommand(cmd, args, opts);
       } catch (error) {
@@ -1235,6 +1281,11 @@ export class WorkbenchStore {
     try {
       this.#isRecreating = true;
       await this.#recreateSandbox();
+
+      // Wait for dev server to be ready after user-initiated recreation
+      logger.info('Waiting for dev server to be ready after recreation...');
+      await this.waitForDevServerReady();
+      logger.info('Sandbox recreation complete, dev server is ready');
     } finally {
       this.#isRecreating = false;
     }
@@ -1865,7 +1916,14 @@ export class WorkbenchStore {
        */
       console.log('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
 
-      const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);
+      // First check if package.json exists and where we are
+      const pwdResult = await provider.runCommand('pwd', []);
+      console.log('[DEBUG #autoStartDevServer] Current directory:', pwdResult.stdout);
+
+      const lsResult = await provider.runCommand('ls', ['-la']);
+      console.log('[DEBUG #autoStartDevServer] Directory contents:', lsResult.stdout);
+
+      const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund']);
       console.log('[DEBUG #autoStartDevServer] npm install completed:', {
         exitCode: installResult.exitCode,
         stdout: installResult.stdout?.substring(0, 500),
@@ -1907,6 +1965,15 @@ export class WorkbenchStore {
        * NOTE: Browser console errors (runtime errors) are NOT captured here.
        * They occur in the iframe and require a different mechanism to capture.
        */
+
+      // Set up promise that resolves when dev server is ready
+      this.#devServerStarting = true;
+
+      let resolveDevServerReady: () => void;
+      this.#devServerReadyPromise = new Promise((resolve) => {
+        resolveDevServerReady = resolve;
+      });
+
       provider.runCommand('sh', devArgs).catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
@@ -1923,8 +1990,15 @@ export class WorkbenchStore {
         } else if (!is410) {
           logger.error('Dev server command failed unexpectedly', { error: msg });
         }
+
+        // Mark dev server as no longer starting (even on error)
+        this.#devServerStarting = false;
+        resolveDevServerReady!();
       });
       console.log('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
+
+      // Poll for dev server readiness
+      this.#pollDevServerReady(provider, resolveDevServerReady!);
 
       // NOW register previews — dev server is starting, so the iframe can begin polling
       const previewUrls = provider.getPreviewUrls();
@@ -1943,6 +2017,77 @@ export class WorkbenchStore {
       logger.error('[autoStartDevServer] Error during auto-start', { error: errorDetails });
       console.error('[DEBUG #autoStartDevServer] Error during auto-start:', errorDetails);
     }
+  }
+
+  /**
+   * Poll for dev server readiness by checking if the preview URL responds.
+   * Resolves the promise when the server is ready or after max attempts.
+   */
+  async #pollDevServerReady(provider: SandboxProvider, resolve: () => void): Promise<void> {
+    const previewUrls = provider.getPreviewUrls();
+    const firstUrl = previewUrls.values().next().value as string | undefined;
+
+    if (!firstUrl) {
+      logger.warn('[pollDevServerReady] No preview URL available');
+      this.#devServerStarting = false;
+      resolve();
+
+      return;
+    }
+
+    const maxAttempts = 60; // 60 attempts * 1s = 60s max wait
+    let attempts = 0;
+
+    const checkReady = async () => {
+      attempts++;
+
+      try {
+        const healthRes = await fetch('/api/sandbox/health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: firstUrl }),
+        });
+        const healthData = (await healthRes.json()) as { ready?: boolean };
+
+        if (healthData.ready) {
+          logger.info('[pollDevServerReady] Dev server is ready');
+          this.#devServerStarting = false;
+          resolve();
+
+          return;
+        }
+      } catch {
+        // Health check failed, server not ready yet
+      }
+
+      if (attempts >= maxAttempts) {
+        logger.warn('[pollDevServerReady] Dev server readiness check timed out');
+        this.#devServerStarting = false;
+        resolve();
+
+        return;
+      }
+
+      // Check again in 1 second
+      setTimeout(checkReady, 1000);
+    };
+
+    // Start polling
+    checkReady();
+  }
+
+  /**
+   * Wait for the dev server to be ready before executing commands.
+   * This prevents LLM commands from running before the dev server is up.
+   */
+  async waitForDevServerReady(): Promise<void> {
+    if (!this.#devServerStarting || !this.#devServerReadyPromise) {
+      return; // Dev server not starting, no need to wait
+    }
+
+    logger.debug('[waitForDevServerReady] Waiting for dev server to be ready...');
+    await this.#devServerReadyPromise;
+    logger.debug('[waitForDevServerReady] Dev server is ready');
   }
 
   /**
@@ -2515,6 +2660,47 @@ export class WorkbenchStore {
         (relativePath, timeout) => {
           this.#filesStore.markRecentlySaved(relativePath, timeout);
         },
+
+        // onSandboxExpired - trigger auto-recovery when sandbox dies during command execution
+        async () => {
+          if (this.#isRecreating) {
+            logger.warn('Sandbox recreation already in progress, waiting...');
+
+            // Wait for existing recreation to complete
+            await new Promise((resolve) => {
+              const checkInterval = setInterval(() => {
+                if (!this.#isRecreating) {
+                  clearInterval(checkInterval);
+                  resolve(undefined);
+                }
+              }, 500);
+            });
+
+            return;
+          }
+
+          try {
+            this.#isRecreating = true;
+            this.loadingStatus.set('Sandbox session expired. Recreating...');
+            await this.#recreateSandbox();
+
+            // Wait for dev server to be ready before allowing commands
+            logger.info('Waiting for dev server to be ready after auto-recovery...');
+            await this.waitForDevServerReady();
+            logger.info('Sandbox auto-recovery complete after command failure');
+          } catch (recoveryError) {
+            logger.error('Sandbox auto-recovery failed', { error: recoveryError });
+            this.actionAlert.set({
+              type: 'error',
+              title: 'Session Recovery Failed',
+              description: 'Could not restore your session. Please refresh the page to continue.',
+              content: '',
+            });
+            throw recoveryError;
+          } finally {
+            this.#isRecreating = false;
+          }
+        },
       ),
     });
   }
@@ -2533,6 +2719,15 @@ export class WorkbenchStore {
     this.artifacts.setKey(artifactId, { ...artifact, ...state });
   }
   addAction(data: ActionCallbackData) {
+    // Skip adding actions for reloaded messages entirely
+    if (this.#reloadedMessages.has(data.messageId)) {
+      logger.debug('[RELOADED_SKIP] Skipping addAction for reloaded message', {
+        messageId: data.messageId,
+        actionType: data.action.type,
+      });
+      return;
+    }
+
     const artifact = this.#getArtifact(data.artifactId);
 
     /*
@@ -2540,7 +2735,17 @@ export class WorkbenchStore {
      * since bundled artifacts are just for display (files are pre-loaded)
      */
     if (artifact?.type === 'bundled') {
+      // Skip bundled actions for reloaded messages too
+      if (this.#reloadedMessages.has(data.messageId)) {
+        logger.debug('[RELOADED_SKIP] Skipping bundled action for reloaded message', {
+          messageId: data.messageId,
+          actionType: data.action.type,
+        });
+        return;
+      }
+
       artifact.runner.addAction(data);
+
       return;
     }
 
@@ -2568,11 +2773,11 @@ export class WorkbenchStore {
       isReloadedMessage: this.#reloadedMessages.has(data.messageId),
     });
 
-    // Skip file actions for reloaded messages to prevent overwriting new content
-    if (this.#reloadedMessages.has(data.messageId) && data.action.type === 'file') {
-      logger.debug('[RELOADED_SKIP] Skipping file action for reloaded message', {
+    // Skip ALL actions for reloaded messages to prevent re-execution of historical commands
+    if (this.#reloadedMessages.has(data.messageId)) {
+      logger.debug('[RELOADED_SKIP] Skipping action for reloaded message', {
         messageId: data.messageId,
-        filePath: data.action.filePath,
+        actionType: data.action.type,
       });
       return;
     }
@@ -2602,11 +2807,11 @@ export class WorkbenchStore {
   }
 
   async _runBundledAction(data: ActionCallbackData) {
-    // Skip file actions for reloaded messages to prevent overwriting new content
-    if (this.#reloadedMessages.has(data.messageId) && data.action.type === 'file') {
-      logger.debug('[RELOADED_SKIP] Skipping bundled file action for reloaded message', {
+    // Skip ALL actions for reloaded messages to prevent re-execution of historical commands
+    if (this.#reloadedMessages.has(data.messageId)) {
+      logger.debug('[RELOADED_SKIP] Skipping bundled action for reloaded message', {
         messageId: data.messageId,
-        filePath: data.action.filePath,
+        actionType: data.action.type,
       });
       return;
     }

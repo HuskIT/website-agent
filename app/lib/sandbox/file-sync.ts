@@ -120,6 +120,26 @@ export class FileSyncManager {
   }
 
   private _pendingContent: Map<string, string> = new Map();
+  private _isStreaming = false; // When true, delays sync until streaming completes
+
+  /**
+   * Set streaming mode. When enabled, file syncs are delayed until streaming completes.
+   * This prevents API spam during LLM streaming.
+   */
+  setStreamingMode(enabled: boolean): void {
+    if (this._isStreaming === enabled) {
+      return;
+    }
+
+    this._isStreaming = enabled;
+    console.log(`[FileSyncManager] Streaming mode ${enabled ? 'enabled' : 'disabled'}`);
+
+    // When streaming ends, flush all pending writes
+    if (!enabled && this._state.pendingWrites.length > 0) {
+      console.log(`[FileSyncManager] Streaming ended, flushing ${this._state.pendingWrites.length} pending writes`);
+      this.flushWrites();
+    }
+  }
 
   /**
    * Immediately flush all pending writes
@@ -188,6 +208,12 @@ export class FileSyncManager {
    */
 
   private _scheduleSync(): void {
+    // Skip scheduling if in streaming mode - will flush when streaming ends
+    if (this._isStreaming) {
+      console.log('[FileSyncManager] Sync delayed - in streaming mode');
+      return;
+    }
+
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }
@@ -206,8 +232,19 @@ export class FileSyncManager {
       providerType: this._provider?.type,
     });
 
-    if (!this._provider || this._state.pendingWrites.length === 0) {
-      console.log('[FileSyncManager] Skipping sync - no provider or no pending writes');
+    if (!this._provider || this._provider.status !== 'connected' || this._state.pendingWrites.length === 0) {
+      console.log('[FileSyncManager] Skipping sync - no provider, not connected, or no pending writes', {
+        hasProvider: !!this._provider,
+        providerStatus: this._provider?.status,
+        pendingWrites: this._state.pendingWrites.length,
+      });
+
+      // If provider is not connected, signal failure so workbench can handle it
+      if (this._provider && this._provider.status !== 'connected' && this._state.pendingWrites.length > 0) {
+        const batch = this._state.pendingWrites.splice(0, this._config.maxBatchSize);
+        this._onSyncFailure?.(batch, 'Sandbox not connected');
+      }
+
       return;
     }
 

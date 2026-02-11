@@ -78,6 +78,13 @@ export const sandboxState = atom<SandboxState>(DEFAULT_STATE);
 /** Provider instance (not serializable, kept separate) */
 let providerInstance: SandboxProvider | null = null;
 
+/** Promise that resolves when provider instance is set */
+let providerInstancePromise: Promise<SandboxProvider> | null = null;
+let resolveProviderInstance: ((provider: SandboxProvider) => void) | null = null;
+
+/** Timeout for waiting for provider instance */
+const PROVIDER_INIT_TIMEOUT = 30000; // 30 seconds max wait
+
 /*
  * =============================================================================
  * Computed Values
@@ -137,8 +144,6 @@ export function setProviderType(type: SandboxProviderType): void {
  * Set connection status
  */
 export function setStatus(status: SandboxStatus): void {
-  const prevStatus = sandboxState.get().status;
-  console.log('[SandboxStore] setStatus:', { from: prevStatus, to: status });
   sandboxState.set({
     ...sandboxState.get(),
     status,
@@ -289,6 +294,46 @@ export function setProviderInstance(provider: SandboxProvider | null): void {
     status: provider?.status ?? 'null',
   });
   providerInstance = provider;
+
+  // Resolve any pending waiters
+  if (provider && resolveProviderInstance) {
+    resolveProviderInstance(provider);
+    resolveProviderInstance = null;
+    providerInstancePromise = null;
+  }
+}
+
+/**
+ * Wait for the provider instance to be initialized.
+ * This is used by ActionRunner to wait for sandbox initialization.
+ * @param timeoutMs Maximum time to wait (default: 30s)
+ * @returns The provider instance or null if timeout
+ */
+export async function waitForProviderInstance(timeoutMs = PROVIDER_INIT_TIMEOUT): Promise<SandboxProvider | null> {
+  // If provider already exists, return it immediately
+  if (providerInstance) {
+    return providerInstance;
+  }
+
+  // If no promise exists yet, create one
+  if (!providerInstancePromise) {
+    providerInstancePromise = new Promise<SandboxProvider>((resolve) => {
+      resolveProviderInstance = resolve;
+    });
+  }
+
+  // Race between provider initialization and timeout
+  const timeoutPromise = new Promise<null>((_, reject) => {
+    setTimeout(() => reject(new Error('Provider initialization timeout')), timeoutMs);
+  });
+
+  try {
+    const provider = await Promise.race([providerInstancePromise, timeoutPromise]);
+    return provider;
+  } catch (error) {
+    console.warn('[SandboxStore] waitForProviderInstance timed out:', error);
+    return null;
+  }
 }
 
 /**

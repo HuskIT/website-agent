@@ -86,6 +86,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify sandbox belongs to project
     if (project.sandbox_id !== sandboxId) {
+      logger.error('Sandbox ID mismatch', {
+        projectId,
+        projectSandboxId: project.sandbox_id,
+        requestSandboxId: sandboxId,
+      });
+
       return new Response(JSON.stringify({ error: 'Sandbox does not belong to project', code: 'FORBIDDEN' }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
@@ -142,10 +148,26 @@ export async function action({ request }: ActionFunctionArgs) {
           const abortController = new AbortController();
           const timeoutId = timeout ? setTimeout(() => abortController.abort(), timeout) : null;
 
+          /*
+           * Detect shell-specific syntax (redirections, pipes, etc.)
+           * If present, wrap the command in bash -c to properly handle shell features
+           */
+          const fullCommand = `${cmd} ${(args || []).join(' ')}`;
+          const hasShellSyntax = /[|&;<>()$`\\]/.test(fullCommand);
+
+          let finalCmd = cmd;
+          let finalArgs = args || [];
+
+          if (hasShellSyntax) {
+            logger.debug('Wrapping command in bash for shell syntax support', { originalCommand: fullCommand });
+            finalCmd = 'bash';
+            finalArgs = ['-c', fullCommand];
+          }
+
           // Launch detached – returns immediately with a live Command object
           const command = await sandbox.runCommand({
-            cmd,
-            args: args || [],
+            cmd: finalCmd,
+            args: finalArgs,
             cwd,
             env,
             sudo,
