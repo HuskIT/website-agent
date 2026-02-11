@@ -373,7 +373,7 @@ export class TimeoutManager {
     }
 
     // Request extension (5 minutes)
-    const extendDuration = 5 * 60 * 1000;
+    const extendDuration = 10 * 60 * 1000;
     logger.info('Auto-extending session due to activity', { recentActivity, extendDuration });
 
     this.requestExtension(extendDuration).catch((error) => {

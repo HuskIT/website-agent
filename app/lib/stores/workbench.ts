@@ -122,6 +122,13 @@ export class WorkbenchStore {
   #sessionStartedAt: number = Date.now();
   #lastKnownSnapshotUpdatedAt: string | null = null;
 
+  // Track if snapshot files have been loaded to prevent duplicate loading
+  #snapshotFilesLoaded = false;
+
+  // Track build status for snapshot quality control
+  #lastBuildStatus: 'success' | 'error' | 'unknown' = 'unknown';
+  #lastBuildError: string | null = null;
+
   #reloadedMessages = new Set<string>();
 
   artifacts: Artifacts = import.meta.hot?.data.artifacts ?? map({});
@@ -273,6 +280,51 @@ export class WorkbenchStore {
   }
 
   /**
+   * Mark that snapshot files have been loaded externally (e.g., by useChatHistory).
+   * This prevents duplicate loading when reconnectOrRestore is called.
+   */
+  markSnapshotFilesLoaded(): void {
+    this.#snapshotFilesLoaded = true;
+    logger.debug('Snapshot files marked as loaded');
+  }
+
+  /**
+   * Reset the snapshot files loaded flag.
+   * Called when changing projects to allow fresh loading.
+   */
+  resetSnapshotFilesLoaded(): void {
+    this.#snapshotFilesLoaded = false;
+    logger.debug('Snapshot files loaded flag reset');
+  }
+
+  /**
+   * Set the build status to track whether the current build was successful.
+   * Used to prevent saving snapshots of broken builds.
+   */
+  setBuildStatus(status: 'success' | 'error', error?: string): void {
+    this.#lastBuildStatus = status;
+    this.#lastBuildError = error || null;
+    logger.debug('Build status updated', { status, hasError: !!error });
+  }
+
+  /**
+   * Get the current build status.
+   */
+  getBuildStatus(): { status: 'success' | 'error' | 'unknown'; error: string | null } {
+    return {
+      status: this.#lastBuildStatus,
+      error: this.#lastBuildError,
+    };
+  }
+
+  /**
+   * Check if the current build is successful and safe to snapshot.
+   */
+  isBuildSuccessful(): boolean {
+    return this.#lastBuildStatus === 'success' || this.#lastBuildStatus === 'unknown';
+  }
+
+  /**
    * Initialize the sandbox provider for the current project.
    * This wires up the provider to FilesStore (via FileSyncManager) and PreviewsStore.
    *
@@ -319,7 +371,7 @@ export class WorkbenchStore {
       userId,
       snapshotId,
       workdir: '/home/project',
-      timeout: 5 * 60 * 1000, // 5 minutes default
+      timeout: 10 * 60 * 1000, // 10 minutes default
       ports: [3000, 5173],
       runtime: 'node22',
     });
@@ -495,6 +547,9 @@ export class WorkbenchStore {
     this.#currentProjectId = projectId;
     this.#currentUserId = userId || 'anonymous';
 
+    // Reset snapshot loaded flag for new project
+    this.#snapshotFilesLoaded = false;
+
     /*
      * PHASE 2: Check for Vercel snapshot BEFORE trying to reconnect
      * If a Vercel snapshot exists, restore from it instead of reconnecting
@@ -574,7 +629,7 @@ export class WorkbenchStore {
                 userId,
                 snapshotId: latestSnapshot.vercel_snapshot_id,
                 workdir: '/home/project',
-                timeout: 5 * 60 * 1000,
+                timeout: 10 * 60 * 1000,
                 ports: [3000, 5173],
                 runtime: 'node22' as const,
               };
@@ -590,7 +645,7 @@ export class WorkbenchStore {
                 providerConfig,
                 data.sandboxId,
                 data.previewUrls,
-                5 * 60 * 1000, // 5 minutes default timeout
+                10 * 60 * 1000, // 10 minutes default timeout
               );
 
               this.#sandboxProvider = provider;
@@ -685,7 +740,7 @@ export class WorkbenchStore {
             projectId,
             userId: effectiveUserId,
             workdir: '/home/project',
-            timeout: 5 * 60 * 1000,
+            timeout: 10 * 60 * 1000,
             ports: [3000, 5173],
             runtime: 'node22',
           },
@@ -1035,7 +1090,7 @@ export class WorkbenchStore {
   /**
    * Request manual timeout extension
    */
-  async requestTimeoutExtension(durationMs: number = 5 * 60 * 1000): Promise<boolean> {
+  async requestTimeoutExtension(durationMs: number = 10 * 60 * 1000): Promise<boolean> {
     if (!this.#timeoutManager) {
       return false;
     }
@@ -1447,6 +1502,12 @@ export class WorkbenchStore {
       return false;
     }
 
+    // Skip if files were already loaded from snapshot (prevents race with useChatHistory)
+    if (this.#snapshotFilesLoaded) {
+      logger.debug('Skipping #loadSnapshotIntoFileStore - files already loaded from snapshot');
+      return true;
+    }
+
     try {
       const response = await fetch(`/api/projects/${projectId}/snapshot`);
 
@@ -1497,6 +1558,7 @@ export class WorkbenchStore {
       }
 
       this.#filesStore.files.set(fileMap);
+      this.#snapshotFilesLoaded = true;
       logger.info('File store populated from snapshot (skip-upload path)', {
         projectId,
         fileCount: Object.keys(snapshot.files).length,
@@ -1523,6 +1585,12 @@ export class WorkbenchStore {
       logger.warn('No active project to restore snapshot for');
 
       return false;
+    }
+
+    // Skip if files were already loaded from snapshot (prevents race with useChatHistory)
+    if (this.#snapshotFilesLoaded) {
+      logger.debug('Skipping restoreFromDatabaseSnapshot - files already loaded from snapshot');
+      return true;
     }
 
     logger.debug('restoreFromDatabaseSnapshot: proceeding with projectId:', projectId);
@@ -1616,6 +1684,7 @@ export class WorkbenchStore {
       }
 
       this.#filesStore.files.set(fileMap);
+      this.#snapshotFilesLoaded = true;
       logger.info('File store populated from snapshot', { projectId, fileCount });
 
       // DEBUG: Log provider state before upload
@@ -1639,7 +1708,7 @@ export class WorkbenchStore {
           });
 
           try {
-            await this.#sandboxProvider.extendTimeout?.(5 * 60 * 1000);
+            await this.#sandboxProvider.extendTimeout?.(10 * 60 * 1000);
             logger.info('Sandbox timeout extended');
           } catch (extendError) {
             logger.warn('Failed to extend sandbox timeout, proceeding anyway', { error: extendError });

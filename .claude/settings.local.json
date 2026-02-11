@@ -96,7 +96,11 @@
       "Bash(__NEW_LINE_4aba0963134ad4de__ if [ -z \"$VERCEL_PROJECT_ID\" ])",
       "Bash(if [ -f .env.local ])",
       "Bash(set:*)",
-      "Bash(pnpm run test:error-capture:*)"
+      "Bash(pnpm run test:error-capture:*)",
+      "Bash(git checkout:*)",
+      "Bash(git reset:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []

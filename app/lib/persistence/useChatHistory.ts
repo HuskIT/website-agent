@@ -717,6 +717,7 @@ ${value.content}
     // Update file store in one atomic operation (instant UI)
     console.log('🔥🔥🔥 useChatHistory: Populating file store with', Object.keys(fileMap).length, 'entries');
     workbenchStore.filesStore.files.set(fileMap);
+    workbenchStore.markSnapshotFilesLoaded();
     console.log('🔥🔥🔥 useChatHistory: File store populated');
 
     logger.info('Snapshot files loaded to store (cloud-native)', {
@@ -930,18 +931,30 @@ ${value.content}
       await workbenchStore.waitForActionsToComplete();
       await workbenchStore.saveAllFiles();
 
-      // Log the files being captured in the snapshot for debugging
-      const filesMap = workbenchStore.files.get();
-      const fileEntries = Object.entries(filesMap).filter(([, v]) => v?.type === 'file');
-      const sampleFile = fileEntries.find(([path]) => path.includes('content') || path.includes('data'));
+      // Check build status before saving snapshot - skip if build failed
+      const buildStatus = workbenchStore.getBuildStatus();
 
-      logger.info('Taking snapshot', {
-        filesCount: fileEntries.length,
-        sampleFilePath: sampleFile?.[0],
-        sampleContentPreview: (sampleFile?.[1] as any)?.content?.substring(0, 200),
-      });
+      if (buildStatus.status === 'error') {
+        logger.warn('Skipping snapshot save due to build error', {
+          error: buildStatus.error,
+        });
+        toast.warning('Changes not saved: Build has errors. Fix them to save progress.', {
+          autoClose: 5000,
+        });
+      } else {
+        // Log the files being captured in the snapshot for debugging
+        const filesMap = workbenchStore.files.get();
+        const fileEntries = Object.entries(filesMap).filter(([, v]) => v?.type === 'file');
+        const sampleFile = fileEntries.find(([path]) => path.includes('content') || path.includes('data'));
 
-      takeSnapshot(messages[messages.length - 1].id, filesMap, _urlId, chatSummary);
+        logger.info('Taking snapshot', {
+          filesCount: fileEntries.length,
+          sampleFilePath: sampleFile?.[0],
+          sampleContentPreview: (sampleFile?.[1] as any)?.content?.substring(0, 200),
+        });
+
+        takeSnapshot(messages[messages.length - 1].id, filesMap, _urlId, chatSummary);
+      }
 
       if (!description.get() && firstArtifact?.title) {
         description.set(firstArtifact?.title);

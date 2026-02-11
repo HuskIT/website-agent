@@ -409,7 +409,7 @@ export const Workbench = memo(
           <TimeoutWarning
             isVisible={showTimeoutWarning}
             timeRemainingMs={timeRemainingMs}
-            onExtend={() => workbenchStore.requestTimeoutExtension(5 * 60 * 1000)}
+            onExtend={() => workbenchStore.requestTimeoutExtension(10 * 60 * 1000)}
             onDismiss={hideWarning}
           />
           <div

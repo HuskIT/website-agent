@@ -100,7 +100,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         ...VERCEL_CREDS,
         source: { type: 'snapshot', snapshotId },
         runtime: 'node22',
-        timeout: 5 * 60 * 1000, // 5 min default
+        timeout: 10 * 60 * 1000, // 10 min default
         ports: [3000, 5173],
       });
 

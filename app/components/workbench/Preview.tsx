@@ -212,6 +212,9 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
           console.log('[Preview] Build/runtime error detected during health check:', data.error);
           setServerReady(true); // Load iframe anyway to show error
 
+          // Mark build as failed
+          workbenchStore.setBuildStatus('error', `${data.error.pattern}: ${data.error.snippet}`);
+
           // Show alert in chat with "Ask HuskIT" button
           workbenchStore.actionAlert.set({
             type: 'error',
@@ -227,6 +230,9 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
         if (data.ready && active) {
           console.log('[Preview] Vercel dev server is ready, loading iframe');
           setServerReady(true);
+
+          // Mark build as successful
+          workbenchStore.setBuildStatus('success');
 
           return;
         }
@@ -279,6 +285,9 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
         if (data.error && !errorAlertShown && active) {
           console.log('[Preview] Runtime error detected:', data.error);
           errorAlertShown = true;
+
+          // Mark build as failed
+          workbenchStore.setBuildStatus('error', `${data.error.pattern}: ${data.error.snippet}`);
 
           // Show alert in chat with "Ask HuskIT" button
           workbenchStore.actionAlert.set({

@@ -66,7 +66,7 @@ export function TimeoutWarning({ timeRemainingMs, isVisible, onExtend: _onExtend
     setExtendError(null);
 
     try {
-      const success = await workbenchStore.requestTimeoutExtension(5 * 60 * 1000); // 5 minutes
+      const success = await workbenchStore.requestTimeoutExtension(10 * 60 * 1000); // 10 minutes
 
       if (success) {
         logger.info('Session extended successfully');
