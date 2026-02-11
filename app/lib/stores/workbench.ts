@@ -2015,9 +2015,10 @@ export class WorkbenchStore {
       /*
        * Determine if this is a Vite project – if so, append --host so the dev
        * server binds to 0.0.0.0 (needed for Vercel Sandbox port proxy).
+       * Run npm directly (not via sh) to avoid PATH issues in the sandbox.
        */
       const isVite = (scripts[scriptName] || '').includes('vite');
-      const devArgs = isVite ? ['-c', `npm run ${scriptName} -- --host`] : ['-c', `npm run ${scriptName}`];
+      const devArgs = isVite ? ['run', scriptName, '--', '--host'] : ['run', scriptName];
 
       logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
 
@@ -2036,7 +2037,7 @@ export class WorkbenchStore {
         resolveDevServerReady = resolve;
       });
 
-      provider.runCommand('sh', devArgs).catch((error) => {
+      provider.runCommand('npm', devArgs, { cwd: '/home/project' }).catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
 
