@@ -1359,21 +1359,41 @@ export class WorkbenchStore {
       // Clear previews for old sandbox
       const previews = this.#previewsStore.previews.get();
 
+      logger.info('[recreateSandbox] Current previews before clearing:', {
+        count: previews.length,
+        previews: previews.map((p) => ({ port: p.port, url: p.baseUrl, provider: p.provider })),
+      });
+
       for (const preview of previews) {
         if (preview.provider === 'vercel') {
+          logger.info('[recreateSandbox] Unregistering old Vercel preview:', {
+            port: preview.port,
+            url: preview.baseUrl,
+          });
           this.#previewsStore.unregisterPreview(preview.port);
         }
       }
+
+      const previewsAfterClear = this.#previewsStore.previews.get();
+
+      logger.info('[recreateSandbox] Previews after clearing Vercel:', {
+        count: previewsAfterClear.length,
+        previews: previewsAfterClear.map((p) => ({ port: p.port, url: p.baseUrl, provider: p.provider })),
+      });
 
       // 3. Create new sandbox
       this.loadingStatus.set('Creating new sandbox...');
 
       const newProvider = await this.initializeProvider(this.#currentProviderType, projectId, userId || 'anonymous');
 
+      const previewUrlsAfterInit = newProvider.getPreviewUrls();
+
       logger.info('New sandbox created', {
         projectId,
         newSandboxId: newProvider.sandboxId,
         oldSandboxId,
+        previewUrlsCount: previewUrlsAfterInit.size,
+        previewUrls: Array.from(previewUrlsAfterInit.entries()).map(([port, url]) => ({ port, url })),
       });
 
       /*
@@ -1383,6 +1403,11 @@ export class WorkbenchStore {
 
       // 4. Restore files from database snapshot
       this.loadingStatus.set('Restoring files...');
+
+      // Reset snapshot flag so files are uploaded to the new sandbox and dev server starts
+      this.#snapshotFilesLoaded = false;
+      logger.info('[recreateSandbox] Reset #snapshotFilesLoaded flag for new sandbox');
+
       await this.restoreFromDatabaseSnapshot();
 
       // 5. Clear loading status on success
@@ -2252,10 +2277,22 @@ export class WorkbenchStore {
       // NOW register previews — dev server is starting, so the iframe can begin polling
       const previewUrls = provider.getPreviewUrls();
 
+      logger.info('[autoStartDevServer] Preview URLs from provider:', {
+        count: previewUrls.size,
+        urls: Array.from(previewUrls.entries()).map(([port, url]) => ({ port, url })),
+      });
+
       for (const [port, url] of previewUrls) {
         logger.info('Registering preview after dev server start', { port, url });
         this.#previewsStore.registerPreview(port, url, 'vercel');
       }
+
+      const allPreviews = this.#previewsStore.previews.get();
+
+      logger.info('[autoStartDevServer] All previews after registration:', {
+        count: allPreviews.length,
+        previews: allPreviews.map((p) => ({ port: p.port, url: p.baseUrl, provider: p.provider })),
+      });
     } catch (error) {
       const errorDetails = {
         message: error instanceof Error ? error.message : String(error),
