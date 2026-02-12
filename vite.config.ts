@@ -257,6 +257,7 @@ export default defineConfig((config) => {
       'LMSTUDIO_API_BASE_URL',
       'TOGETHER_API_BASE_URL',
       'LANGFUSE_',
+      'CONSOLE_INTERCEPTOR_',
     ],
     ssr: {
       // Don't apply browser polyfills in SSR - use native Node.js modules

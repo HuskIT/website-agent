@@ -945,12 +945,14 @@ export class FilesStore {
       this.#ensureParentFolders(relativePath);
 
       /*
-       * 1.5. Ensure console interceptor is present in HTML files
+       * 1.5. Ensure console interceptor is present in HTML files (if enabled)
        * This catches cases where LLM edits might overwrite the interceptor
        */
       let finalContent = content;
 
-      if (!isBinary && typeof content === 'string') {
+      const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+
+      if (!isBinary && typeof content === 'string' && isConsoleInterceptorEnabled()) {
         const { ensureConsoleInterceptor } = await import('~/lib/utils/ensure-console-interceptor');
         finalContent = ensureConsoleInterceptor(relativePath, content);
       }

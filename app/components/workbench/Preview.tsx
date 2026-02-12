@@ -7,6 +7,7 @@ import { ScreenshotSelector } from './ScreenshotSelector';
 import { expoUrlAtom } from '~/lib/stores/qrCodeStore';
 import { ExpoQrModal } from '~/components/workbench/ExpoQrModal';
 import type { ElementInfo } from './Inspector';
+import { isConsoleInterceptorEnabled } from '~/lib/utils/feature-flags';
 
 type ResizeSide = 'left' | 'right' | null;
 
@@ -105,6 +106,10 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
 
   // Listen for console messages from preview iframe (HuskIT Console Interceptor)
   useEffect(() => {
+    if (!isConsoleInterceptorEnabled()) {
+      return undefined; // Feature disabled
+    }
+
     const handleConsoleMessage = (event: MessageEvent) => {
       // Validate message type (dedicated channel)
       if (event.data?.type !== 'huskit:preview-console') {

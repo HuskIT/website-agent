@@ -932,7 +932,11 @@ export class WorkbenchStore {
                 await this.#loadSnapshotIntoFileStore();
 
                 // Ensure console interceptor is present in sandbox (critical for reconnection case)
-                await this.#ensureConsoleInterceptorInSandbox(provider);
+                const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+
+                if (isConsoleInterceptorEnabled()) {
+                  await this.#ensureConsoleInterceptorInSandbox(provider);
+                }
 
                 // Register preview URLs so the iframe picks them up
                 for (const [port, url] of previewUrls) {
@@ -1875,6 +1879,10 @@ export class WorkbenchStore {
 
       // Write all files to sandbox in chunked batches (Vercel has 4MB limit)
       if (this.#sandboxProvider) {
+        // Check if console interceptor is enabled (once, before the loop)
+        const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+        const interceptorEnabled = isConsoleInterceptorEnabled();
+
         // Prepare files in API-ready format (bypass provider to avoid Buffer issues)
         const apiFiles = Object.entries(snapshot.files)
           .filter(([filePath, fileData]) => {
@@ -1914,8 +1922,8 @@ export class WorkbenchStore {
               // Text files: content is UTF-8 string, send as utf8 (schema expects 'utf8' not 'utf-8')
               let content = fileData.content;
 
-              // Inject console interceptor into HTML files for error capture
-              if (filePath.match(/\.(html|htm)$/i) && content.includes('<html')) {
+              // Inject console interceptor into HTML files for error capture (if enabled)
+              if (filePath.match(/\.(html|htm)$/i) && content.includes('<html') && interceptorEnabled) {
                 content = injectConsoleInterceptor(content);
                 logger.debug('[restoreFromDatabaseSnapshot] Injected console interceptor into:', filePath);
               }
