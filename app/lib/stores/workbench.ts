@@ -1605,6 +1605,28 @@ export class WorkbenchStore {
     }
 
     /*
+     * CRITICAL: Don't save incomplete snapshots during initial project generation.
+     * The LLM generates files progressively, and auto-save might trigger before
+     * package.json and other critical files are generated.
+     *
+     * Skip saving if critical files are missing - the snapshot will be saved
+     * later when all files are present.
+     */
+    const hasPackageJson = 'package.json' in filesToSave;
+    const hasIndexHtml = 'index.html' in filesToSave;
+
+    if (!hasPackageJson || !hasIndexHtml) {
+      logger.warn('[saveSnapshotToDatabase] Skipping incomplete snapshot - critical files missing', {
+        projectId,
+        fileCount,
+        hasPackageJson,
+        hasIndexHtml,
+      });
+
+      return;
+    }
+
+    /*
      * CONFLICT DETECTION: Check if snapshot was modified by another tab/session
      * This prevents silent data loss when multiple tabs are editing the same project
      */
