@@ -1,0 +1,5 @@
+- name: Configure AWS (OIDC)
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: arn:aws:iam::372123585180:role/github-actions-huskit-website-agent
+    aws-region: eu-central-1
