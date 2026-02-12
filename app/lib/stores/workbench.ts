@@ -1585,6 +1585,15 @@ export class WorkbenchStore {
           content: dirent.content,
           isBinary: dirent.isBinary,
         };
+
+        // Debug: Log critical files being saved
+        if (path === 'package.json' || path === 'vite.config.ts' || path === 'index.html') {
+          logger.debug('[saveSnapshotToDatabase] Saving critical file:', {
+            path,
+            contentLength: dirent.content?.length || 0,
+            isBinary: dirent.isBinary,
+          });
+        }
       }
     }
 
@@ -1695,6 +1704,17 @@ export class WorkbenchStore {
       if (!snapshot.files || Object.keys(snapshot.files).length === 0) {
         return false;
       }
+
+      // Debug: Log snapshot file list
+      const fileList = Object.keys(snapshot.files);
+      logger.info('[loadSnapshotIntoFileStore] Snapshot loaded', {
+        projectId,
+        fileCount: fileList.length,
+        hasPackageJson: fileList.includes('package.json'),
+        hasIndexHtml: fileList.includes('index.html'),
+        hasViteConfig: fileList.includes('vite.config.ts') || fileList.includes('vite.config.js'),
+        sampleFiles: fileList.slice(0, 10),
+      });
 
       this.#lastKnownSnapshotUpdatedAt = snapshot.updated_at;
       this.#sessionStartedAt = Date.now();
