@@ -931,11 +931,18 @@ export class WorkbenchStore {
                 // Populate editor file tree from DB snapshot (no upload)
                 await this.#loadSnapshotIntoFileStore();
 
-                // Ensure console interceptor is present in sandbox (critical for reconnection case)
-                const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+                /*
+                 * Ensure console interceptor is present in sandbox (critical for reconnection case)
+                 * Wrapped in try-catch to NEVER block reconnection
+                 */
+                try {
+                  const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
 
-                if (isConsoleInterceptorEnabled()) {
-                  await this.#ensureConsoleInterceptorInSandbox(provider);
+                  if (isConsoleInterceptorEnabled()) {
+                    await this.#ensureConsoleInterceptorInSandbox(provider);
+                  }
+                } catch {
+                  // NEVER let interceptor check block reconnection
                 }
 
                 // Register preview URLs so the iframe picks them up
@@ -1880,8 +1887,15 @@ export class WorkbenchStore {
       // Write all files to sandbox in chunked batches (Vercel has 4MB limit)
       if (this.#sandboxProvider) {
         // Check if console interceptor is enabled (once, before the loop)
-        const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
-        const interceptorEnabled = isConsoleInterceptorEnabled();
+        let interceptorEnabled = false;
+
+        try {
+          const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+          interceptorEnabled = isConsoleInterceptorEnabled();
+        } catch {
+          // If feature flags fail, disable interceptor (don't block file upload)
+          interceptorEnabled = false;
+        }
 
         // Prepare files in API-ready format (bypass provider to avoid Buffer issues)
         const apiFiles = Object.entries(snapshot.files)
@@ -1922,10 +1936,18 @@ export class WorkbenchStore {
               // Text files: content is UTF-8 string, send as utf8 (schema expects 'utf8' not 'utf-8')
               let content = fileData.content;
 
-              // Inject console interceptor into HTML files for error capture (if enabled)
-              if (filePath.match(/\.(html|htm)$/i) && content.includes('<html') && interceptorEnabled) {
-                content = injectConsoleInterceptor(content);
-                logger.debug('[restoreFromDatabaseSnapshot] Injected console interceptor into:', filePath);
+              /*
+               * Inject console interceptor into HTML files for error capture (if enabled)
+               * Wrapped to NEVER block file upload
+               */
+              if (interceptorEnabled && filePath.match(/\.(html|htm)$/i) && content.includes('<html')) {
+                try {
+                  content = injectConsoleInterceptor(content);
+                  logger.debug('[restoreFromDatabaseSnapshot] Injected console interceptor into:', filePath);
+                } catch {
+                  // NEVER let injector errors block file upload
+                  logger.warn('[restoreFromDatabaseSnapshot] Interceptor injection failed, using original:', filePath);
+                }
               }
 
               return {

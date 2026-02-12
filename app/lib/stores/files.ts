@@ -947,14 +947,21 @@ export class FilesStore {
       /*
        * 1.5. Ensure console interceptor is present in HTML files (if enabled)
        * This catches cases where LLM edits might overwrite the interceptor
+       * Wrapped in try/catch to NEVER block file saving
        */
       let finalContent = content;
 
-      const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
+      try {
+        const { isConsoleInterceptorEnabled } = await import('~/lib/utils/feature-flags');
 
-      if (!isBinary && typeof content === 'string' && isConsoleInterceptorEnabled()) {
-        const { ensureConsoleInterceptor } = await import('~/lib/utils/ensure-console-interceptor');
-        finalContent = ensureConsoleInterceptor(relativePath, content);
+        if (!isBinary && typeof content === 'string' && isConsoleInterceptorEnabled()) {
+          const { ensureConsoleInterceptor } = await import('~/lib/utils/ensure-console-interceptor');
+          finalContent = ensureConsoleInterceptor(relativePath, content);
+        }
+      } catch (error) {
+        // NEVER let interceptor errors block file saving
+        logger.warn('[saveFile] Console interceptor injection failed, continuing with original content:', error);
+        finalContent = content;
       }
 
       /*
