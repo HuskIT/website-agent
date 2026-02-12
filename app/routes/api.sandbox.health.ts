@@ -96,7 +96,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ready: false, status: response.status });
     }
 
-    const text = await response.text();
+    let text = await response.text();
+
+    /*
+     * Strip out the HuskIT Console Interceptor code before checking for errors.
+     * The interceptor contains strings like "Uncaught" which would trigger
+     * false positive error detection.
+     */
+    const interceptorStart = text.indexOf('/* HUSKIT_CONSOLE_INTERCEPTOR_START');
+    const interceptorEnd = text.indexOf('HUSKIT_CONSOLE_INTERCEPTOR_END */');
+
+    if (interceptorStart !== -1 && interceptorEnd !== -1 && interceptorEnd > interceptorStart) {
+      text = text.slice(0, interceptorStart) + text.slice(interceptorEnd + 34);
+    }
+
     const lowerText = text.toLowerCase();
 
     // Check for NOT-ready patterns (proxy error/loading pages)

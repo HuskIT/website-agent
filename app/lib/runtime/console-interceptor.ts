@@ -23,6 +23,7 @@
  */
 export function getConsoleInterceptorCode(): string {
   return `
+/* HUSKIT_CONSOLE_INTERCEPTOR_START - Health check should ignore code below */
 (function() {
   'use strict';
 
@@ -157,6 +158,7 @@ export function getConsoleInterceptorCode(): string {
     sendToParent('info', ['🔧 HuskIT Console Interceptor installed']);
   }
 })();
+/* HUSKIT_CONSOLE_INTERCEPTOR_END */
 `.trim();
 }
 
