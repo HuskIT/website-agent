@@ -29,9 +29,7 @@ import { useChatHistory } from '~/lib/persistence';
 import { streamingState } from '~/lib/stores/streaming';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { TimeoutWarning, useTimeoutWarning } from './TimeoutWarning';
-import { TimeoutDialog } from './TimeoutDialog';
 import { ProviderBadge } from './ProviderBadge';
-import { timeoutEvent, clearTimeoutEvent } from '~/lib/stores/timeout';
 
 interface WorkspaceProps {
   isStreaming?: boolean;
@@ -317,37 +315,6 @@ export const Workbench = memo(
       updateTimeRemaining,
     } = useTimeoutWarning();
 
-    // Timeout dialog state - shown when session actually expires
-    const [showTimeoutDialog, setShowTimeoutDialog] = useState(false);
-    const timeout = useStore(timeoutEvent);
-
-    // Subscribe to timeout events
-    useEffect(() => {
-      if (timeout) {
-        setShowTimeoutDialog(true);
-
-        // Hide the warning toast when the timeout dialog is shown
-        hideWarning();
-      }
-    }, [timeout, hideWarning]);
-
-    // Handle restart from timeout dialog
-    const handleTimeoutRestart = useCallback(async () => {
-      clearTimeoutEvent();
-      setShowTimeoutDialog(false);
-
-      // Restart the sandbox by recreating the provider
-      await workbenchStore.recreateSandbox();
-    }, []);
-
-    // Handle dismiss from timeout dialog
-    const handleTimeoutDismiss = useCallback(() => {
-      clearTimeoutEvent();
-      setShowTimeoutDialog(false);
-
-      // Optionally disconnect the provider or navigate away
-    }, []);
-
     // Set up timeout warning listener
     useEffect(() => {
       const timeoutManager = workbenchStore.timeoutManager;
@@ -449,13 +416,6 @@ export const Workbench = memo(
             timeRemainingMs={timeRemainingMs}
             onExtend={() => workbenchStore.requestTimeoutExtension(10 * 60 * 1000)}
             onDismiss={hideWarning}
-          />
-
-          {/* Timeout Dialog - shown when session expires (001-sandbox-providers) */}
-          <TimeoutDialog
-            isVisible={showTimeoutDialog}
-            onRestart={handleTimeoutRestart}
-            onDismiss={handleTimeoutDismiss}
           />
 
           <div

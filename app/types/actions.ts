@@ -43,7 +43,7 @@ export interface ActionAlert {
   title: string;
   description: string;
   content: string;
-  source?: 'terminal' | 'preview'; // Add source to differentiate between terminal and preview errors
+  source?: 'terminal' | 'preview' | 'timeout'; // Add source to differentiate between terminal, preview, and timeout errors
 }
 
 export interface SupabaseAlert {
