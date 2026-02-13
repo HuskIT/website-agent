@@ -8,6 +8,10 @@
 
 import type { SandboxProvider } from './types';
 import { createScopedLogger } from '~/utils/logger';
+import { ActivityTracker } from './activity-tracker';
+import { AdaptiveExtensionStrategy } from './adaptive-extension';
+import { loadConfig, type AdaptiveExtensionConfig } from './extension-config';
+import type { ActivityType } from './extension-config';
 
 const logger = createScopedLogger('TimeoutManager');
 
@@ -42,10 +46,11 @@ export interface TimeoutManagerConfig {
 
 /**
  * Activity tracking for auto-extension
+ * Note: Kept for backwards compatibility, but adaptive extension uses ActivityType from extension-config
  */
 interface ActivityRecord {
   timestamp: number;
-  type: 'file_write' | 'command' | 'preview_access' | 'user_interaction';
+  type: ActivityType | 'file_write' | 'command'; // Legacy types for backwards compatibility
 }
 
 /**
@@ -96,8 +101,14 @@ export class TimeoutManager {
   private _lastExtendAt = 0;
   private _lastWarningAt = 0;
   private _isDisposed = false;
+  private _warningResetTimeout: NodeJS.Timeout | null = null;
 
-  constructor(config: TimeoutManagerConfig) {
+  // Adaptive extension strategy
+  private _adaptiveStrategy: AdaptiveExtensionStrategy;
+  private _activityTracker: ActivityTracker;
+  private _adaptiveConfig: AdaptiveExtensionConfig;
+
+  constructor(config: TimeoutManagerConfig, adaptiveConfig?: Partial<AdaptiveExtensionConfig>) {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._state = {
       timeRemainingMs: 0,
@@ -107,6 +118,18 @@ export class TimeoutManager {
       isExpired: false,
       autoExtendPaused: false,
     };
+
+    // Initialize adaptive extension strategy
+    this._adaptiveConfig = loadConfig(adaptiveConfig);
+    this._adaptiveStrategy = new AdaptiveExtensionStrategy(this._adaptiveConfig);
+    this._activityTracker = new ActivityTracker(this._adaptiveConfig);
+
+    logger.info('TimeoutManager initialized with adaptive extension', {
+      hotDuration: this._adaptiveConfig.extensionDurations.hot / 60000,
+      warmDuration: this._adaptiveConfig.extensionDurations.warm / 60000,
+      coolDuration: this._adaptiveConfig.extensionDurations.cool / 60000,
+      maxLifetime: this._adaptiveConfig.maxSessionLifetime / 60000,
+    });
   }
 
   /**
@@ -154,6 +177,11 @@ export class TimeoutManager {
       this._checkInterval = null;
     }
 
+    if (this._warningResetTimeout) {
+      clearTimeout(this._warningResetTimeout);
+      this._warningResetTimeout = null;
+    }
+
     this._provider = null;
     logger.info('TimeoutManager stopped');
   }
@@ -178,6 +206,7 @@ export class TimeoutManager {
     const now = Date.now();
     this._state.lastActivityAt = now;
 
+    // Legacy activity tracking (kept for backwards compatibility)
     this._activities.push({
       timestamp: now,
       type,
@@ -186,6 +215,11 @@ export class TimeoutManager {
     // Clean up old activities (keep last 100)
     if (this._activities.length > 100) {
       this._activities = this._activities.slice(-100);
+    }
+
+    // Track in adaptive activity tracker (only user_interaction and preview_access)
+    if (type === 'user_interaction' || type === 'preview_access') {
+      this._activityTracker.recordActivity(type as ActivityType);
     }
 
     logger.debug('Activity recorded', { type, timeRemainingMs: this._state.timeRemainingMs });
@@ -227,6 +261,12 @@ export class TimeoutManager {
         this._lastExtendAt = Date.now();
         this._state.warningShown = false;
         this._lastWarningAt = 0;
+
+        // Clear any pending warning reset timeout
+        if (this._warningResetTimeout) {
+          clearTimeout(this._warningResetTimeout);
+          this._warningResetTimeout = null;
+        }
 
         // Update state with new timeout
         this._state.timeRemainingMs += durationMs;
@@ -333,9 +373,15 @@ export class TimeoutManager {
     logger.info('Showing timeout warning', { timeRemainingMs });
     this._config.onWarning(timeRemainingMs);
 
+    // Clear any existing warning reset timeout
+    if (this._warningResetTimeout) {
+      clearTimeout(this._warningResetTimeout);
+    }
+
     // Reset warning flag after threshold period so it can be shown again
-    setTimeout(() => {
+    this._warningResetTimeout = setTimeout(() => {
       this._state.warningShown = false;
+      this._warningResetTimeout = null;
     }, this._config.warningThresholdMs);
   }
 
@@ -352,33 +398,46 @@ export class TimeoutManager {
       return;
     }
 
-    const now = Date.now();
+    // Use adaptive extension strategy
+    const decision = this._adaptiveStrategy.shouldExtend(this._state.timeRemainingMs, this._activityTracker);
 
-    // Don't auto-extend too frequently
-    if (now - this._lastExtendAt < this._config.minAutoExtendIntervalMs) {
+    if (!decision.shouldExtend) {
+      logger.debug('Auto-extend skipped', { reason: decision.reason });
       return;
     }
 
-    // Only auto-extend if time is running low
-    if (this._state.timeRemainingMs > this._config.warningThresholdMs * 2) {
+    const { heat, duration } = decision;
+
+    if (!heat || !duration) {
+      logger.warn('Auto-extend approved but missing heat or duration', { decision });
       return;
     }
 
-    // Check if there's been meaningful activity
-    const recentActivity = this.getRecentActivityCount(60000);
-
-    if (recentActivity < 3) {
-      // Not enough activity to justify auto-extend
-      return;
-    }
-
-    // Request extension (5 minutes)
-    const extendDuration = 10 * 60 * 1000;
-    logger.info('Auto-extending session due to activity', { recentActivity, extendDuration });
-
-    this.requestExtension(extendDuration).catch((error) => {
-      logger.error('Auto-extend failed', { error });
+    logger.info('Auto-extending session', {
+      heat,
+      duration: duration / 60000,
+      reason: decision.reason,
+      scores: this._activityTracker.getActivityScores(),
+      metrics: this._adaptiveStrategy.getMetrics(heat, this._activityTracker.getActivityScores()),
     });
+
+    this.requestExtension(duration)
+      .then((success) => {
+        if (success) {
+          this._adaptiveStrategy.recordExtension(heat, duration);
+          this._lastExtendAt = Date.now();
+          logger.info('Extension successful', {
+            heat,
+            duration: duration / 60000,
+            newTimeRemaining: this._state.timeRemainingMs / 60000,
+          });
+        } else {
+          logger.warn('Extension request returned false', { heat, duration });
+        }
+      })
+      .catch((error) => {
+        logger.error('Auto-extend failed', { error, heat, duration });
+      });
   }
 }
 

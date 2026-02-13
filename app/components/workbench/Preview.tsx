@@ -363,6 +363,63 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
     };
   }, [isVercelPreview, serverReady, iframeUrl]);
 
+  /*
+   * Track preview_access activity for adaptive sandbox timeout extension.
+   * Records user interactions with the preview iframe (load, click, scroll)
+   * to help determine if the session should be auto-extended.
+   */
+  useEffect(() => {
+    const iframe = iframeRef.current;
+
+    if (!iframe) {
+      return;
+    }
+
+    // Track iframe load as preview access
+    const onLoad = () => {
+      workbenchStore.recordActivity('preview_access');
+    };
+
+    // Track interactions within iframe content
+    const onInteraction = () => {
+      workbenchStore.recordActivity('preview_access');
+    };
+
+    iframe.addEventListener('load', onLoad);
+
+    // Try to attach listeners to iframe content (may fail due to CORS)
+    try {
+      const contentWindow = iframe.contentWindow;
+
+      if (contentWindow) {
+        contentWindow.addEventListener('click', onInteraction, true);
+        contentWindow.addEventListener('scroll', onInteraction, true);
+      }
+    } catch (_error) {
+      /*
+       * CORS restriction - iframe is cross-origin, can't attach content listeners
+       * This is expected for Vercel sandbox previews
+       */
+      console.debug('[Preview] Cannot attach iframe content listeners (CORS)');
+    }
+
+    // eslint-disable-next-line consistent-return
+    return () => {
+      iframe.removeEventListener('load', onLoad);
+
+      try {
+        const contentWindow = iframe.contentWindow;
+
+        if (contentWindow) {
+          contentWindow.removeEventListener('click', onInteraction, true);
+          contentWindow.removeEventListener('scroll', onInteraction, true);
+        }
+      } catch {
+        // Cleanup failed - iframe may be unloaded
+      }
+    };
+  }, [iframeRef.current]); // Re-run when iframe ref changes
+
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {
       return preview.port < array[minIndex].port ? index : minIndex;

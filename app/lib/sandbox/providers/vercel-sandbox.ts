@@ -53,6 +53,11 @@ export class VercelSandboxProvider implements SandboxProvider {
   private _previewUrls: Map<number, string> = new Map();
   private _timeoutCheckInterval: NodeJS.Timeout | null = null;
 
+  // Track sandbox creation time and extensions for accurate timeout calculation
+  private _createdAt: Date | null = null;
+  private _initialTimeout: number | null = null;
+  private _totalExtensions: number = 0;
+
   // Resource usage tracking (T037)
   private _resourceMetrics = {
     cpuPercent: 0,
@@ -69,7 +74,16 @@ export class VercelSandboxProvider implements SandboxProvider {
   }
 
   get timeoutRemaining(): number | null {
-    return this._timeoutRemaining;
+    // Calculate actual remaining time based on elapsed time since creation
+    if (!this._createdAt || !this._initialTimeout) {
+      return this._timeoutRemaining;
+    }
+
+    const elapsed = Date.now() - this._createdAt.getTime();
+    const totalTimeout = this._initialTimeout + this._totalExtensions;
+    const remaining = totalTimeout - elapsed;
+
+    return Math.max(0, remaining);
   }
 
   /**
@@ -108,6 +122,17 @@ export class VercelSandboxProvider implements SandboxProvider {
 
       this._sandboxId = data.sandboxId;
       this._timeoutRemaining = data.timeout;
+
+      // Store creation time and initial timeout for accurate remaining time calculation
+      this._createdAt = new Date(data.createdAt);
+      this._initialTimeout = data.timeout;
+      this._totalExtensions = 0;
+
+      logger.info('Sandbox created', {
+        sandboxId: data.sandboxId,
+        createdAt: this._createdAt.toISOString(),
+        initialTimeout: this._initialTimeout / 60000,
+      });
 
       // Set up preview URLs
       for (const [port, url] of Object.entries(data.previewUrls)) {
@@ -706,6 +731,15 @@ export class VercelSandboxProvider implements SandboxProvider {
 
     const data: ExtendTimeoutResponse = await response.json();
     this._timeoutRemaining = data.newTimeout;
+
+    // Track total extensions for accurate remaining time calculation
+    this._totalExtensions += duration;
+
+    logger.info('Sandbox timeout extended', {
+      duration: duration / 60000,
+      totalExtensions: this._totalExtensions / 60000,
+      newTimeout: data.newTimeout / 60000,
+    });
   }
 
   /*
@@ -746,6 +780,11 @@ export class VercelSandboxProvider implements SandboxProvider {
     this._sandboxId = null;
     this._timeoutRemaining = null;
     this._previewUrls.clear();
+
+    // Reset timeout tracking fields
+    this._createdAt = null;
+    this._initialTimeout = null;
+    this._totalExtensions = 0;
   }
 
   private _startTimeoutTracking(): void {
@@ -770,6 +809,39 @@ export class VercelSandboxProvider implements SandboxProvider {
 
         const data: GetSandboxStatusResponse = await response.json();
         this._timeoutRemaining = data.timeout;
+
+        // Initialize tracking fields if not set (reconnect case)
+        if (!this._createdAt && !this._initialTimeout) {
+          // Use expiresAt to back-calculate the creation time if available
+          if (data.expiresAt) {
+            const expiresAtTime = new Date(data.expiresAt).getTime();
+            const now = Date.now();
+            const remainingMs = expiresAtTime - now;
+
+            /*
+             * Back-calculate creation time: createdAt = now - (initialTimeout - remaining)
+             * Assume initialTimeout = data.timeout at creation (may not be accurate after extensions)
+             */
+            this._createdAt = new Date(now - (data.timeout - remainingMs));
+            this._initialTimeout = data.timeout;
+            this._totalExtensions = 0;
+
+            logger.info('Initialized timeout tracking from status', {
+              createdAt: this._createdAt.toISOString(),
+              expiresAt: data.expiresAt,
+              initialTimeout: this._initialTimeout / 60000,
+            });
+          } else {
+            // No expiresAt, just use current timestamp as baseline
+            this._createdAt = new Date();
+            this._initialTimeout = data.timeout;
+            this._totalExtensions = 0;
+
+            logger.info('Initialized timeout tracking with current timestamp', {
+              initialTimeout: this._initialTimeout / 60000,
+            });
+          }
+        }
 
         if (data.status === 'stopped' || data.status === 'failed') {
           this._setStatus('disconnected');

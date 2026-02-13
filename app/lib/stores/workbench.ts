@@ -25,6 +25,7 @@ import { createSandboxProvider, resolveProviderType } from '~/lib/sandbox';
 import { FileSyncManager } from '~/lib/sandbox/file-sync';
 import { TimeoutManager, type TimeoutManagerConfig } from '~/lib/sandbox/timeout-manager';
 import { injectConsoleInterceptor } from '~/lib/utils/inject-console-interceptor';
+import { triggerTimeoutEvent } from './timeout';
 
 const { saveAs } = fileSaver;
 const logger = createScopedLogger('WorkbenchStore');
@@ -1126,7 +1127,7 @@ export class WorkbenchStore {
       onTimeout: () => {
         logger.info('Session timeout occurred - saving snapshot before expiry');
 
-        // Save snapshot before showing error (fire-and-forget, but log result)
+        // Save snapshot before showing dialog (fire-and-forget, but log result)
         this.saveSnapshotToDatabase()
           .then(() => {
             logger.info('Snapshot saved successfully before timeout');
@@ -1135,13 +1136,8 @@ export class WorkbenchStore {
             logger.error('Failed to save snapshot before timeout', { error });
           })
           .finally(() => {
-            // Show warning alert after snapshot attempt (regardless of success)
-            this.actionAlert.set({
-              type: 'warning',
-              title: 'Session Expired',
-              description: 'Your sandbox session has expired. Your work has been saved. Click Restart to continue.',
-              content: '',
-            });
+            // Trigger timeout event - the UI will show the TimeoutDialog
+            triggerTimeoutEvent('expired');
           });
       },
       onExtended: (durationMs) => {
