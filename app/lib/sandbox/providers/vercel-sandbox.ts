@@ -74,14 +74,14 @@ export class VercelSandboxProvider implements SandboxProvider {
   }
 
   get timeoutRemaining(): number | null {
-    // Calculate actual remaining time based on elapsed time since creation
-    if (!this._createdAt || !this._initialTimeout) {
+    // Use server-provided timeout if available and we haven't started local tracking yet
+    if (!this._createdAt || this._initialTimeout === null) {
       return this._timeoutRemaining;
     }
 
+    // Calculate actual remaining time based on elapsed time since last sync
     const elapsed = Date.now() - this._createdAt.getTime();
-    const totalTimeout = this._initialTimeout + this._totalExtensions;
-    const remaining = totalTimeout - elapsed;
+    const remaining = this._initialTimeout - elapsed;
 
     return Math.max(0, remaining);
   }
@@ -274,6 +274,23 @@ export class VercelSandboxProvider implements SandboxProvider {
    */
 
   /**
+   * Normalize file path for Vercel sandbox.
+   * Vercel sandbox uses root as working directory (not /home/project).
+   * Strips leading /home/project or /home/project/ from paths.
+   */
+  private _normalizePath(path: string): string {
+    if (path.startsWith('/home/project/')) {
+      return path.slice('/home/project/'.length);
+    }
+
+    if (path === '/home/project') {
+      return '';
+    }
+
+    return path;
+  }
+
+  /**
    * Write a single file
    */
   async writeFile(path: string, content: string | Buffer): Promise<void> {
@@ -300,7 +317,7 @@ export class VercelSandboxProvider implements SandboxProvider {
         projectId: this._config.projectId,
         sandboxId: this._sandboxId,
         files: files.map((f) => ({
-          path: f.path,
+          path: this._normalizePath(f.path),
           content: f.content.toString('base64'),
           encoding: 'base64',
         })),
@@ -335,7 +352,7 @@ export class VercelSandboxProvider implements SandboxProvider {
       throw new Error('Sandbox not connected');
     }
 
-    const encodedPath = encodeURIComponent(path);
+    const encodedPath = encodeURIComponent(this._normalizePath(path));
     const response = await fetch(
       `/api/sandbox/files/${encodedPath}?projectId=${this._config.projectId}&sandboxId=${this._sandboxId}`,
     );
@@ -373,7 +390,8 @@ export class VercelSandboxProvider implements SandboxProvider {
    * NOTE: prefer writeFiles() for file creation – it auto-creates parent dirs.
    */
   async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-    const result = await this.runCommand('mkdir', options?.recursive ? ['-p', path] : [path]);
+    const normalizedPath = this._normalizePath(path);
+    const result = await this.runCommand('mkdir', options?.recursive ? ['-p', normalizedPath] : [normalizedPath]);
 
     // mkdir without -p exits 1 when dir already exists – treat as success
     if (result.exitCode !== 0 && !options?.recursive) {
@@ -384,14 +402,16 @@ export class VercelSandboxProvider implements SandboxProvider {
       }
     }
 
-    this._emitFileChange({ type: 'add_dir', path });
+    this._emitFileChange({ type: 'add_dir', path: normalizedPath });
   }
 
   /**
    * Check if a file or directory exists
    */
   async exists(path: string): Promise<boolean> {
-    const result = await this.runCommand('test', ['-e', path]);
+    const normalizedPath = this._normalizePath(path);
+    const result = await this.runCommand('test', ['-e', normalizedPath]);
+
     return result.exitCode === 0;
   }
 
@@ -425,7 +445,7 @@ export class VercelSandboxProvider implements SandboxProvider {
         sandboxId: this._sandboxId,
         cmd,
         args,
-        cwd: opts?.cwd,
+        cwd: opts?.cwd ? this._normalizePath(opts.cwd) : undefined,
         env: opts?.env,
         timeout: opts?.timeout,
         sudo: opts?.sudo,
@@ -521,7 +541,7 @@ export class VercelSandboxProvider implements SandboxProvider {
         sandboxId: this._sandboxId,
         cmd,
         args,
-        cwd: opts?.cwd,
+        cwd: opts?.cwd ? this._normalizePath(opts.cwd) : undefined,
         env: opts?.env,
         timeout: opts?.timeout,
         sudo: opts?.sudo,
@@ -732,8 +752,13 @@ export class VercelSandboxProvider implements SandboxProvider {
     const data: ExtendTimeoutResponse = await response.json();
     this._timeoutRemaining = data.newTimeout;
 
-    // Track total extensions for accurate remaining time calculation
-    this._totalExtensions += duration;
+    /*
+     * Update creation time to now so timeoutRemaining calculation is accurate after extension
+     * The server has extended the timeout, so we treat this as a fresh start for local calculations
+     */
+    this._createdAt = new Date();
+    this._initialTimeout = data.newTimeout;
+    this._totalExtensions = 0;
 
     logger.info('Sandbox timeout extended', {
       duration: duration / 60000,

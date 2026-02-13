@@ -336,6 +336,15 @@ export class TimeoutManager {
       return;
     }
 
+    // Skip updating from provider if we just extended (race condition prevention)
+    const timeSinceLastExtend = Date.now() - this._lastExtendAt;
+    const EXTENSION_SETTLE_MS = 2000; // 2 second grace period after extension
+
+    if (timeSinceLastExtend < EXTENSION_SETTLE_MS) {
+      logger.debug('Skipping provider sync - recently extended', { timeSinceLastExtend });
+      return;
+    }
+
     // Get current timeout from provider
     const timeoutRemaining = this._provider.timeoutRemaining;
 
