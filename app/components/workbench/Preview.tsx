@@ -8,6 +8,7 @@ import { expoUrlAtom } from '~/lib/stores/qrCodeStore';
 import { ExpoQrModal } from '~/components/workbench/ExpoQrModal';
 import type { ElementInfo } from './Inspector';
 import { isConsoleInterceptorEnabled } from '~/lib/utils/feature-flags';
+import { ErrorQueueManager } from '~/lib/runtime/error-queue-manager';
 
 type ResizeSide = 'left' | 'right' | null;
 
@@ -104,11 +105,19 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const [isReloading, setIsReloading] = useState(false);
   const scrollPositionRef = useRef({ x: 0, y: 0 });
 
+  // Error queue manager for batching multiple console errors
+  const errorQueueManager = useRef<ErrorQueueManager | null>(null);
+
   // Listen for console messages from preview iframe (HuskIT Console Interceptor)
   useEffect(() => {
     if (!isConsoleInterceptorEnabled()) {
       return undefined; // Feature disabled
     }
+
+    // Initialize error queue manager
+    errorQueueManager.current = new ErrorQueueManager((alert) => {
+      workbenchStore.actionAlert.set(alert);
+    });
 
     const handleConsoleMessage = (event: MessageEvent) => {
       // Validate message type (dedicated channel)
@@ -120,20 +129,9 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
 
       console.log(`[Preview] Captured ${level} from iframe:`, message);
 
-      // Auto-send errors immediately to LLM (via action alert)
+      // Auto-send errors to queue for batching
       if (autoError && level === 'error') {
-        // Throttle alerts - only show if no alert currently active
-        const currentAlert = workbenchStore.actionAlert.get();
-
-        if (!currentAlert) {
-          workbenchStore.actionAlert.set({
-            type: 'error',
-            title: 'Runtime Error in Preview',
-            description: 'An error occurred in the generated website. Send to HuskIT AI to fix?',
-            content: message,
-            source: 'preview',
-          });
-        }
+        errorQueueManager.current?.addError(event.data);
       }
     };
 
@@ -141,6 +139,8 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
 
     return () => {
       window.removeEventListener('message', handleConsoleMessage);
+      errorQueueManager.current?.clear();
+      errorQueueManager.current = null;
     };
   }, []);
 
