@@ -1826,19 +1826,15 @@ export class WorkbenchStore {
       const fileCount = Object.keys(snapshot.files).length;
       logger.info(`Restoring ${fileCount} files from snapshot`, { projectId, snapshotUpdatedAt: snapshot.updated_at });
 
-      // DEBUG: Log state before any operations
-      logger.debug('[DEBUG restoreFromDatabaseSnapshot] Starting restore:', {
+      logger.debug('Starting restore', {
         projectId,
         fileCount,
-        hasSandboxProvider: !!this.#sandboxProvider,
-        hasFileSyncManager: !!this.#fileSyncManager,
       });
 
       // Isolate FileSyncManager to prevent micro-batch uploads during restore
       savedFileSyncManager = this.#fileSyncManager;
 
       if (this.#fileSyncManager) {
-        logger.debug('[DEBUG restoreFromDatabaseSnapshot] Flushing and disabling FileSyncManager');
         await this.#fileSyncManager.flushWrites();
         this.#fileSyncManager = null;
         this.#filesStore.setFileSyncManager(null);
@@ -2153,27 +2149,36 @@ export class WorkbenchStore {
    * (required for Vercel Sandbox port proxying).
    */
   async #autoStartDevServer(files: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
-    logger.debug('[DEBUG #autoStartDevServer] Starting auto-start process');
-
     const provider = this.#sandboxProvider;
 
     if (!provider) {
-      logger.warn('[DEBUG #autoStartDevServer] No provider available');
+      logger.warn('[autoStartDevServer] No provider available');
       return;
     }
 
-    logger.debug('[DEBUG #autoStartDevServer] Provider available:', { type: provider.type, status: provider.status });
+    logger.debug('Auto-starting dev server', { type: provider.type, status: provider.status });
 
-    const pkgRaw = files['package.json'];
+    let pkgRaw = files['package.json'];
+
+    // If package.json not in passed files, try reading directly from sandbox (for Vercel snapshot restore)
+    if (!pkgRaw && provider.type === 'vercel') {
+      logger.debug('package.json not in passed files, reading from sandbox...');
+
+      const pkgContent = await provider.readFile('package.json');
+
+      if (pkgContent) {
+        pkgRaw = { content: pkgContent, isBinary: false };
+        logger.debug('Found package.json in sandbox');
+      }
+    }
 
     if (!pkgRaw) {
       logger.warn('[autoStartDevServer] No package.json in snapshot – skipping auto-start');
-      logger.warn('[DEBUG #autoStartDevServer] No package.json found');
 
       return;
     }
 
-    logger.debug('[DEBUG #autoStartDevServer] Found package.json');
+    logger.debug('Found package.json, parsing...');
 
     let pkg: { scripts?: Record<string, string> };
 
@@ -2195,45 +2200,26 @@ export class WorkbenchStore {
     }
 
     logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
-    logger.debug('[DEBUG #autoStartDevServer] About to run npm install with sandbox:', {
-      sandboxId: provider.sandboxId,
-      providerType: provider.type,
-      providerStatus: provider.status,
-    });
 
     try {
       /*
        * Await install so dependencies are available before starting the server
        * Use retry wrapper to handle sandbox expiration during long-running install
        */
-      logger.debug('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
-
       const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);
-      logger.debug('[DEBUG #autoStartDevServer] npm install completed:', {
+      logger.debug('npm install completed', {
         exitCode: installResult.exitCode,
-        stdout: installResult.stdout?.substring(0, 500),
-        stderr: installResult.stderr?.substring(0, 500),
       });
 
       if (installResult.exitCode !== 0) {
         logger.error('[autoStartDevServer] npm install failed', {
           exitCode: installResult.exitCode,
-          stdout: installResult.stdout,
-          stderr: installResult.stderr,
-        });
-        logger.error('[DEBUG #autoStartDevServer] npm install failed:', {
-          exitCode: installResult.exitCode,
-          stdout: installResult.stdout,
-          stderr: installResult.stderr,
         });
 
         return;
       }
 
-      logger.debug('[DEBUG #autoStartDevServer] npm install succeeded');
-
       logger.info('[autoStartDevServer] npm install succeeded, starting server…');
-      logger.debug('[DEBUG #autoStartDevServer] npm install succeeded, starting dev server');
 
       /*
        * Determine if this is a Vite project – if so, append --host so the dev
@@ -2242,7 +2228,7 @@ export class WorkbenchStore {
       const isVite = (scripts[scriptName] || '').includes('vite');
       const npmCommand = isVite ? `npm run ${scriptName} -- --host` : `npm run ${scriptName}`;
 
-      logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, npmCommand });
+      logger.debug('Starting dev server', { isVite, scriptName });
 
       /*
        * Start the dev server with error handling and retry logic.
@@ -2293,7 +2279,7 @@ export class WorkbenchStore {
         );
       }
 
-      logger.debug('[DEBUG #autoStartDevServer] Command attempts:', commandAttempts);
+      logger.debug('Command attempts', { count: commandAttempts.length });
 
       // Try commands in sequence until one works
       let lastError: { exitCode: number; stdout: string; stderr: string } | null = null;
@@ -2357,7 +2343,7 @@ export class WorkbenchStore {
               resolveDevServerReady();
             });
 
-          logger.debug(`[DEBUG #autoStartDevServer] ${attempt.description} started (fire-and-forget)`);
+          logger.debug('Dev server command started', { attempt: attempt.description });
 
           // Command started successfully, break the loop
           break;

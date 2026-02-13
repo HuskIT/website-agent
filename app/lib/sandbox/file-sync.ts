@@ -134,11 +134,11 @@ export class FileSyncManager {
     }
 
     this._isStreaming = enabled;
-    console.log(`[FileSyncManager] Streaming mode ${enabled ? 'enabled' : 'disabled'}`);
+    logger.debug(`Streaming mode ${enabled ? 'enabled' : 'disabled'}`);
 
     // When streaming ends, flush all pending writes
     if (!enabled && this._state.pendingWrites.length > 0) {
-      console.log(`[FileSyncManager] Streaming ended, flushing ${this._state.pendingWrites.length} pending writes`);
+      logger.debug(`Streaming ended, flushing ${this._state.pendingWrites.length} pending writes`);
       this.flushWrites();
     }
   }
@@ -212,7 +212,7 @@ export class FileSyncManager {
   private _scheduleSync(): void {
     // Skip scheduling if in streaming mode - will flush when streaming ends
     if (this._isStreaming) {
-      console.log('[FileSyncManager] Sync delayed - in streaming mode');
+      logger.debug('Sync delayed - in streaming mode');
       return;
     }
 

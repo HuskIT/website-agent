@@ -74,22 +74,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     logger.info('Fetching snapshot', { projectId, userId });
-    console.log('📸 API: Fetching snapshot for project:', projectId);
 
     const snapshot = await getSnapshotByProjectId(projectId, userId);
 
     if (!snapshot) {
       // Return 404 when no snapshot exists
-      console.log('📸 API: No snapshot found for project:', projectId);
       return json({ error: 'Snapshot not found' }, { status: 404 });
     }
-
-    console.log('📸 API: Snapshot retrieved:', {
-      projectId,
-      snapshotId: snapshot.id,
-      hasVercelSnapshotId: !!snapshot.vercel_snapshot_id,
-      vercelSnapshotId: snapshot.vercel_snapshot_id,
-    });
 
     logger.info('Snapshot retrieved', {
       projectId,
