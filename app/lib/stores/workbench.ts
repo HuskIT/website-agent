@@ -943,10 +943,10 @@ export class WorkbenchStore {
             });
           }
 
-          // If sandbox wasn't already running, do the full restore
+          // If sandbox wasn't already running, do the full restore (force=true to upload files even if already loaded)
           if (!sandboxAlreadyRunning) {
             try {
-              const restored = await this.restoreFromDatabaseSnapshot();
+              const restored = await this.restoreFromDatabaseSnapshot(true);
 
               if (restored) {
                 logger.info('Files restored from snapshot after reconnect');
@@ -1046,12 +1046,12 @@ export class WorkbenchStore {
         }
       }
 
-      // For Vercel provider, try to restore files from database snapshot
+      // For Vercel provider, try to restore files from database snapshot (force=true to ensure upload)
       if (providerType === 'vercel') {
         logger.debug('Calling restoreFromDatabaseSnapshot for vercel provider');
 
         try {
-          const restored = await this.restoreFromDatabaseSnapshot();
+          const restored = await this.restoreFromDatabaseSnapshot(true);
 
           if (restored) {
             logger.info('Files restored from snapshot for new sandbox');
@@ -1771,8 +1771,8 @@ export class WorkbenchStore {
    * Restore files from the database snapshot.
    * Called when creating a new sandbox to restore previous state.
    */
-  async restoreFromDatabaseSnapshot(): Promise<boolean> {
-    logger.debug('restoreFromDatabaseSnapshot CALLED');
+  async restoreFromDatabaseSnapshot(force = false): Promise<boolean> {
+    logger.debug('restoreFromDatabaseSnapshot CALLED', { force });
 
     const projectId = this.#currentProjectId;
 
@@ -1783,8 +1783,11 @@ export class WorkbenchStore {
       return false;
     }
 
-    // Skip if files were already loaded from snapshot (prevents race with useChatHistory)
-    if (this.#snapshotFilesLoaded) {
+    /*
+     * Skip if files were already loaded from snapshot (prevents race with useChatHistory).
+     * When force=true (reconnect flow), we still need to upload files to sandbox and start dev server.
+     */
+    if (this.#snapshotFilesLoaded && !force) {
       logger.debug('Skipping restoreFromDatabaseSnapshot - files already loaded from snapshot');
       return true;
     }
