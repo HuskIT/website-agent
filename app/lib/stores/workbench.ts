@@ -1107,28 +1107,44 @@ export class WorkbenchStore {
 
         // The UI will subscribe to timeout warnings via the timeoutManager
       },
-      onTimeout: () => {
-        logger.info('Session timeout occurred - saving snapshot before expiry');
+      onTimeout: async () => {
+        logger.info('Session timeout occurred - saving snapshots before expiry');
 
-        // Save snapshot before showing alert (fire-and-forget, but log result)
-        this.saveSnapshotToDatabase()
-          .then(() => {
-            logger.info('Snapshot saved successfully before timeout');
-          })
-          .catch((error) => {
-            logger.error('Failed to save snapshot before timeout', { error });
-          })
-          .finally(() => {
-            // Show session expired alert in chat panel (actionAlert system)
-            this.actionAlert.set({
-              type: 'error',
-              title: 'Session Expired',
-              description: 'Your sandbox session has expired. Click "Restart" to start a new session.',
-              content:
-                'The Vercel sandbox session has expired due to inactivity. Your work has been saved to the database. You can restart the sandbox to continue working.',
-              source: 'timeout',
-            });
-          });
+        // Save database snapshot and create Vercel snapshot in parallel for faster restore
+        const provider = this.#sandboxProvider;
+
+        await Promise.allSettled([
+          // Save to database (primary persistence)
+          this.saveSnapshotToDatabase()
+            .then(() => {
+              logger.info('Database snapshot saved before timeout');
+            })
+            .catch((error) => {
+              logger.error('Failed to save database snapshot before timeout', { error });
+            }),
+
+          // Create Vercel snapshot for fast restore (if provider supports it)
+          provider?.type === 'vercel'
+            ? provider
+                .createSnapshot?.()
+                .then((result) => {
+                  logger.info('Vercel snapshot created before timeout', { snapshotId: result.snapshotId });
+                })
+                .catch((error) => {
+                  logger.warn('Failed to create Vercel snapshot before timeout', { error });
+                })
+            : Promise.resolve(),
+        ]);
+
+        // Show session expired alert in chat panel (actionAlert system)
+        this.actionAlert.set({
+          type: 'error',
+          title: 'Session Expired',
+          description: 'Your sandbox session has expired. Click "Restart" to start a new session.',
+          content:
+            'The Vercel sandbox session has expired due to inactivity. Your work has been saved to the database. You can restart the sandbox to continue working.',
+          source: 'timeout',
+        });
       },
       onExtended: (durationMs) => {
         logger.info('Session extended', { durationMs });
