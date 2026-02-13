@@ -891,7 +891,9 @@ export class ActionRunner {
     const commonBuildDirs = ['dist', 'build', 'out', 'output', '.next', 'public'];
 
     let buildDir = '';
-    const workdir = '/home/project'; // Standard workdir for both providers
+
+    // Vercel sandbox uses root as working directory, WebContainer uses /home/project
+    const workdir = provider?.type === 'vercel' ? '.' : '/home/project';
 
     // Try to find the first existing build directory
     for (const dir of commonBuildDirs) {
