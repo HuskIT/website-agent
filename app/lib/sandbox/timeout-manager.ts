@@ -2,16 +2,13 @@
  * Timeout Manager
  * Feature: 001-sandbox-providers
  *
- * Manages sandbox session timeouts with activity tracking,
- * warning notifications, and automatic extension logic.
+ * Manages sandbox session timeouts with simple extension logic:
+ * - +3 minutes when user sends a prompt (enter)
+ * - +2 minutes if user was active in the last 2 minutes
  */
 
 import type { SandboxProvider } from './types';
 import { createScopedLogger } from '~/utils/logger';
-import { ActivityTracker } from './activity-tracker';
-import { AdaptiveExtensionStrategy } from './adaptive-extension';
-import { loadConfig, type AdaptiveExtensionConfig } from './extension-config';
-import type { ActivityType } from './extension-config';
 
 const logger = createScopedLogger('TimeoutManager');
 
@@ -45,15 +42,6 @@ export interface TimeoutManagerConfig {
 }
 
 /**
- * Activity tracking for auto-extension
- * Note: Kept for backwards compatibility, but adaptive extension uses ActivityType from extension-config
- */
-interface ActivityRecord {
-  timestamp: number;
-  type: ActivityType | 'file_write' | 'command'; // Legacy types for backwards compatibility
-}
-
-/**
  * Timeout state
  */
 export interface TimeoutState {
@@ -76,6 +64,14 @@ export interface TimeoutState {
   autoExtendPaused: boolean;
 }
 
+/**
+ * Activity record for tracking user actions
+ */
+interface ActivityRecord {
+  timestamp: number;
+  type: 'file_write' | 'command' | 'preview_access' | 'user_interaction' | 'prompt';
+}
+
 const DEFAULT_CONFIG: Partial<TimeoutManagerConfig> = {
   warningThresholdMs: 2 * 60 * 1000, // 2 minutes
   checkIntervalMs: 30 * 1000, // 30 seconds
@@ -83,14 +79,19 @@ const DEFAULT_CONFIG: Partial<TimeoutManagerConfig> = {
   minAutoExtendIntervalMs: 60 * 1000, // 1 minute
 };
 
+// Simple extension rules
+const EXTENSION_RULES = {
+  prompt: 3 * 60 * 1000, // +3 minutes on prompt
+  active: 2 * 60 * 1000, // +2 minutes if active in last 2 minutes
+  activityWindow: 2 * 60 * 1000, // Look at last 2 minutes for activity
+};
+
 /**
  * TimeoutManager handles sandbox session timeout tracking and management.
  *
- * Features:
- * - Tracks time remaining via provider status
- * - Shows warning before timeout
- * - Auto-extends on user activity
- * - Handles timeout expiration
+ * Simple extension strategy:
+ * - +3 minutes when user sends a prompt
+ * - +2 minutes if user was active in last 2 minutes
  */
 export class TimeoutManager {
   private _config: TimeoutManagerConfig;
@@ -103,12 +104,7 @@ export class TimeoutManager {
   private _isDisposed = false;
   private _warningResetTimeout: NodeJS.Timeout | null = null;
 
-  // Adaptive extension strategy
-  private _adaptiveStrategy: AdaptiveExtensionStrategy;
-  private _activityTracker: ActivityTracker;
-  private _adaptiveConfig: AdaptiveExtensionConfig;
-
-  constructor(config: TimeoutManagerConfig, adaptiveConfig?: Partial<AdaptiveExtensionConfig>) {
+  constructor(config: TimeoutManagerConfig) {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._state = {
       timeRemainingMs: 0,
@@ -119,17 +115,7 @@ export class TimeoutManager {
       autoExtendPaused: false,
     };
 
-    // Initialize adaptive extension strategy
-    this._adaptiveConfig = loadConfig(adaptiveConfig);
-    this._adaptiveStrategy = new AdaptiveExtensionStrategy(this._adaptiveConfig);
-    this._activityTracker = new ActivityTracker(this._adaptiveConfig);
-
-    logger.info('TimeoutManager initialized with adaptive extension', {
-      hotDuration: this._adaptiveConfig.extensionDurations.hot / 60000,
-      warmDuration: this._adaptiveConfig.extensionDurations.warm / 60000,
-      coolDuration: this._adaptiveConfig.extensionDurations.cool / 60000,
-      maxLifetime: this._adaptiveConfig.maxSessionLifetime / 60000,
-    });
+    logger.info('TimeoutManager initialized with simple extension rules');
   }
 
   /**
@@ -196,7 +182,9 @@ export class TimeoutManager {
   }
 
   /**
-   * Record user activity (triggers auto-extend if enabled)
+   * Record user activity
+   * - 'prompt' triggers +3 minute extension
+   * - Other activities are tracked for +2 minute active extension
    */
   recordActivity(type: ActivityRecord['type']): void {
     if (this._isDisposed || this._state.isExpired) {
@@ -206,7 +194,7 @@ export class TimeoutManager {
     const now = Date.now();
     this._state.lastActivityAt = now;
 
-    // Legacy activity tracking (kept for backwards compatibility)
+    // Record activity
     this._activities.push({
       timestamp: now,
       type,
@@ -217,15 +205,10 @@ export class TimeoutManager {
       this._activities = this._activities.slice(-100);
     }
 
-    // Track in adaptive activity tracker (only user_interaction and preview_access)
-    if (type === 'user_interaction' || type === 'preview_access') {
-      this._activityTracker.recordActivity(type as ActivityType);
-    }
-
     logger.debug('Activity recorded', { type, timeRemainingMs: this._state.timeRemainingMs });
 
-    // Trigger auto-extend if conditions are met
-    this._maybeAutoExtend();
+    // Check for extension
+    this._maybeAutoExtend(type);
   }
 
   /**
@@ -252,7 +235,7 @@ export class TimeoutManager {
       return false;
     }
 
-    logger.info('Requesting timeout extension', { durationMs });
+    logger.info('Requesting timeout extension', { durationMs: durationMs / 60000 });
 
     try {
       const success = await this._config.requestExtend(durationMs);
@@ -268,9 +251,16 @@ export class TimeoutManager {
           this._warningResetTimeout = null;
         }
 
-        // Update state with new timeout
-        this._state.timeRemainingMs += durationMs;
-        this._state.totalTimeoutMs = this._state.timeRemainingMs;
+        // Update state with new timeout from provider
+
+        if (this._provider) {
+          const newTimeout = this._provider.timeoutRemaining;
+
+          if (newTimeout !== null) {
+            this._state.timeRemainingMs = newTimeout;
+            this._state.totalTimeoutMs = newTimeout;
+          }
+        }
 
         this._config.onExtended(durationMs);
         logger.info('Timeout extended successfully', { newTimeRemainingMs: this._state.timeRemainingMs });
@@ -353,6 +343,7 @@ export class TimeoutManager {
       return;
     }
 
+    // Update state with actual provider timeout
     this._state.timeRemainingMs = timeoutRemaining;
 
     // Check if expired
@@ -402,51 +393,69 @@ export class TimeoutManager {
     this._config.onTimeout();
   }
 
-  private _maybeAutoExtend(): void {
+  /**
+   * Simple auto-extend logic:
+   * - +3 minutes on prompt (user sends message)
+   * - +2 minutes if user was active in last 2 minutes
+   */
+  private _maybeAutoExtend(activityType: ActivityRecord['type']): void {
     if (!this._config.autoExtend || this._state.autoExtendPaused || !this._config.requestExtend) {
       return;
     }
 
-    // Use adaptive extension strategy
-    const decision = this._adaptiveStrategy.shouldExtend(this._state.timeRemainingMs, this._activityTracker);
+    // Check rate limiting (minimum interval between extensions)
+    const timeSinceLastExtend = Date.now() - this._lastExtendAt;
 
-    if (!decision.shouldExtend) {
-      logger.debug('Auto-extend skipped', { reason: decision.reason });
+    if (timeSinceLastExtend < this._config.minAutoExtendIntervalMs) {
+      logger.debug('Auto-extend rate limited', { timeSinceLastExtend });
       return;
     }
 
-    const { heat, duration } = decision;
+    let extensionDuration = 0;
+    let reason = '';
 
-    if (!heat || !duration) {
-      logger.warn('Auto-extend approved but missing heat or duration', { decision });
+    // Rule 1: +3 minutes on prompt
+    if (activityType === 'prompt') {
+      extensionDuration = EXTENSION_RULES.prompt;
+      reason = 'User sent prompt (+3 min)';
+    }
+    // Rule 2: +2 minutes if active in last 2 minutes
+    else if (this._wasActiveInWindow(EXTENSION_RULES.activityWindow)) {
+      extensionDuration = EXTENSION_RULES.active;
+      reason = 'User active in last 2 min (+2 min)';
+    }
+
+    if (extensionDuration === 0) {
       return;
     }
 
     logger.info('Auto-extending session', {
-      heat,
-      duration: duration / 60000,
-      reason: decision.reason,
-      scores: this._activityTracker.getActivityScores(),
-      metrics: this._adaptiveStrategy.getMetrics(heat, this._activityTracker.getActivityScores()),
+      duration: extensionDuration / 60000,
+      reason,
     });
 
-    this.requestExtension(duration)
+    this.requestExtension(extensionDuration)
       .then((success) => {
         if (success) {
-          this._adaptiveStrategy.recordExtension(heat, duration);
-          this._lastExtendAt = Date.now();
           logger.info('Extension successful', {
-            heat,
-            duration: duration / 60000,
+            duration: extensionDuration / 60000,
             newTimeRemaining: this._state.timeRemainingMs / 60000,
           });
         } else {
-          logger.warn('Extension request returned false', { heat, duration });
+          logger.warn('Extension request returned false');
         }
       })
       .catch((error) => {
-        logger.error('Auto-extend failed', { error, heat, duration });
+        logger.error('Auto-extend failed', { error });
       });
+  }
+
+  /**
+   * Check if user was active in the given time window
+   */
+  private _wasActiveInWindow(windowMs: number): boolean {
+    const cutoff = Date.now() - windowMs;
+    return this._activities.some((a) => a.timestamp > cutoff);
   }
 }
 
