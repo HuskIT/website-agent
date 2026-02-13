@@ -153,59 +153,80 @@ export const DEFAULT_CONFIG: AdaptiveExtensionConfig = {
 };
 
 /**
+ * Get environment variable from Vite's import.meta.env or process.env
+ */
+function getEnvVar(name: string): string | undefined {
+  // Vite exposes env vars via import.meta.env
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    return import.meta.env[name] as string | undefined;
+  }
+
+  // Fallback to process.env for Node.js/server-side
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[name];
+  }
+
+  return undefined;
+}
+
+/**
  * Load configuration from environment variables with defaults
  */
 export function loadConfig(overrides?: Partial<AdaptiveExtensionConfig>): AdaptiveExtensionConfig {
   const envConfig: Partial<AdaptiveExtensionConfig> = {};
 
-  // Load from environment variables if available
-  if (typeof process !== 'undefined' && process.env) {
-    const env = process.env;
+  // Load from environment variables (Vite exposes SANDBOX_ prefixed vars)
+  const hotDuration = getEnvVar('SANDBOX_EXTENSION_HOT_DURATION');
 
-    if (env.SANDBOX_EXTENSION_HOT_DURATION) {
-      envConfig.extensionDurations = {
-        ...DEFAULT_CONFIG.extensionDurations,
-        hot: parseInt(env.SANDBOX_EXTENSION_HOT_DURATION, 10),
-      };
-    }
+  if (hotDuration) {
+    envConfig.extensionDurations = {
+      ...DEFAULT_CONFIG.extensionDurations,
+      hot: parseInt(hotDuration, 10),
+    };
+  }
 
-    if (env.SANDBOX_EXTENSION_WARM_DURATION) {
-      envConfig.extensionDurations = {
-        ...DEFAULT_CONFIG.extensionDurations,
-        ...envConfig.extensionDurations,
-        warm: parseInt(env.SANDBOX_EXTENSION_WARM_DURATION, 10),
-      };
-    }
+  const warmDuration = getEnvVar('SANDBOX_EXTENSION_WARM_DURATION');
 
-    if (env.SANDBOX_EXTENSION_COOL_DURATION) {
-      envConfig.extensionDurations = {
-        ...DEFAULT_CONFIG.extensionDurations,
-        ...envConfig.extensionDurations,
-        cool: parseInt(env.SANDBOX_EXTENSION_COOL_DURATION, 10),
-      };
-    }
+  if (warmDuration) {
+    envConfig.extensionDurations = {
+      ...DEFAULT_CONFIG.extensionDurations,
+      ...envConfig.extensionDurations,
+      warm: parseInt(warmDuration, 10),
+    };
+  }
 
-    if (env.SANDBOX_EXTENSION_MAX_HOT || env.SANDBOX_EXTENSION_MAX_WARM || env.SANDBOX_EXTENSION_MAX_COOL) {
-      envConfig.maxExtensions = {
-        hot: env.SANDBOX_EXTENSION_MAX_HOT
-          ? parseInt(env.SANDBOX_EXTENSION_MAX_HOT, 10)
-          : DEFAULT_CONFIG.maxExtensions.hot,
-        warm: env.SANDBOX_EXTENSION_MAX_WARM
-          ? parseInt(env.SANDBOX_EXTENSION_MAX_WARM, 10)
-          : DEFAULT_CONFIG.maxExtensions.warm,
-        cool: env.SANDBOX_EXTENSION_MAX_COOL
-          ? parseInt(env.SANDBOX_EXTENSION_MAX_COOL, 10)
-          : DEFAULT_CONFIG.maxExtensions.cool,
-      };
-    }
+  const coolDuration = getEnvVar('SANDBOX_EXTENSION_COOL_DURATION');
 
-    if (env.SANDBOX_SESSION_MAX_LIFETIME) {
-      envConfig.maxSessionLifetime = parseInt(env.SANDBOX_SESSION_MAX_LIFETIME, 10);
-    }
+  if (coolDuration) {
+    envConfig.extensionDurations = {
+      ...DEFAULT_CONFIG.extensionDurations,
+      ...envConfig.extensionDurations,
+      cool: parseInt(coolDuration, 10),
+    };
+  }
 
-    if (env.SANDBOX_INITIAL_TIMEOUT) {
-      envConfig.initialTimeout = parseInt(env.SANDBOX_INITIAL_TIMEOUT, 10);
-    }
+  const maxHot = getEnvVar('SANDBOX_EXTENSION_MAX_HOT');
+  const maxWarm = getEnvVar('SANDBOX_EXTENSION_MAX_WARM');
+  const maxCool = getEnvVar('SANDBOX_EXTENSION_MAX_COOL');
+
+  if (maxHot || maxWarm || maxCool) {
+    envConfig.maxExtensions = {
+      hot: maxHot ? parseInt(maxHot, 10) : DEFAULT_CONFIG.maxExtensions.hot,
+      warm: maxWarm ? parseInt(maxWarm, 10) : DEFAULT_CONFIG.maxExtensions.warm,
+      cool: maxCool ? parseInt(maxCool, 10) : DEFAULT_CONFIG.maxExtensions.cool,
+    };
+  }
+
+  const maxLifetime = getEnvVar('SANDBOX_SESSION_MAX_LIFETIME');
+
+  if (maxLifetime) {
+    envConfig.maxSessionLifetime = parseInt(maxLifetime, 10);
+  }
+
+  const initialTimeout = getEnvVar('SANDBOX_INITIAL_TIMEOUT');
+
+  if (initialTimeout) {
+    envConfig.initialTimeout = parseInt(initialTimeout, 10);
   }
 
   // Merge: defaults < env < overrides
