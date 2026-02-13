@@ -4,6 +4,9 @@
 
 import { atom, map } from 'nanostores';
 import type { InfoCollectionSession, CollectionStep } from '~/types/info-collection';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('InfoCollectionStore');
 
 // Current active session
 export const activeSession = atom<InfoCollectionSession | null>(null);
@@ -75,7 +78,7 @@ export async function fetchActiveSession(): Promise<void> {
       setActiveSession(null);
     }
   } catch (error) {
-    console.error('Failed to fetch active session:', error);
+    logger.error('Failed to fetch active session', { error });
     setActiveSession(null);
   } finally {
     isLoadingSession.set(false);

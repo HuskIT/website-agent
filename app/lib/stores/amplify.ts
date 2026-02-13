@@ -2,6 +2,9 @@ import { atom } from 'nanostores';
 import type { AmplifyConnection } from '~/types/deployment';
 import { logStore } from './logs';
 import { toast } from 'react-toastify';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('AmplifyStore');
 
 const storedConnection = typeof window !== 'undefined' ? localStorage.getItem('amplify_connection') : null;
 
@@ -86,7 +89,7 @@ export async function fetchAmplifyStats(accessKeyId: string, secretAccessKey: st
       },
     });
   } catch (error) {
-    console.error('Amplify API Error:', error);
+    logger.error('Amplify API Error', { error });
     logStore.logError('Failed to fetch Amplify stats', { error });
     toast.error('Failed to fetch Amplify statistics');
   } finally {

@@ -302,7 +302,7 @@ ${themePrompt}
     ---
     `;
   } else {
-    console.log('No locked files found from any source for prompt.');
+    logger.debug('No locked files found from any source for prompt');
   }
 
   logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);

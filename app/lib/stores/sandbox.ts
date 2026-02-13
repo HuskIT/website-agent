@@ -8,6 +8,9 @@
 
 import { atom, computed } from 'nanostores';
 import type { SandboxProvider, SandboxStatus, SandboxProviderType, PreviewInfo } from '~/lib/sandbox/types';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('SandboxStore');
 
 /*
  * =============================================================================
@@ -287,7 +290,7 @@ export function setDefaultProvider(provider: SandboxProviderType): void {
  * Set the provider instance (called by factory)
  */
 export function setProviderInstance(provider: SandboxProvider | null): void {
-  console.log('[SandboxStore] setProviderInstance:', {
+  logger.debug('setProviderInstance', {
     from: providerInstance?.type ?? 'null',
     to: provider?.type ?? 'null',
     sandboxId: provider?.sandboxId ?? 'null',
@@ -331,7 +334,7 @@ export async function waitForProviderInstance(timeoutMs = PROVIDER_INIT_TIMEOUT)
     const provider = await Promise.race([providerInstancePromise, timeoutPromise]);
     return provider;
   } catch (error) {
-    console.warn('[SandboxStore] waitForProviderInstance timed out:', error);
+    logger.warn('waitForProviderInstance timed out', { error });
     return null;
   }
 }
@@ -342,17 +345,13 @@ export async function waitForProviderInstance(timeoutMs = PROVIDER_INIT_TIMEOUT)
 export function getProviderInstance(): SandboxProvider | null {
   // Debug logging
   if (providerInstance) {
-    console.log('[SandboxStore] getProviderInstance:', {
+    logger.debug('getProviderInstance', {
       type: providerInstance.type,
       status: providerInstance.status,
       sandboxId: providerInstance.sandboxId,
-      timestamp: Date.now(),
     });
   } else {
-    console.log('[SandboxStore] getProviderInstance: null', {
-      timestamp: Date.now(),
-      stack: new Error().stack?.split('\n').slice(2, 5).join(' | '),
-    });
+    logger.debug('getProviderInstance: null');
   }
 
   return providerInstance;
@@ -362,7 +361,7 @@ export function getProviderInstance(): SandboxProvider | null {
  * Force set provider status (for debugging/reconnection scenarios)
  */
 export function forceSetProviderStatus(status: SandboxStatus): void {
-  console.log('[SandboxStore] forceSetProviderStatus:', {
+  logger.debug('forceSetProviderStatus', {
     from: providerInstance?.status ?? 'null',
     to: status,
     sandboxId: providerInstance?.sandboxId ?? 'null',
@@ -410,7 +409,7 @@ export function onConnect(sandboxId: string | null, projectId: string): void {
  * Handle disconnection
  */
 export function onDisconnect(): void {
-  console.log('[SandboxStore] onDisconnect called', {
+  logger.debug('onDisconnect called', {
     currentProvider: providerInstance?.type ?? 'null',
     sandboxId: providerInstance?.sandboxId ?? 'null',
   });

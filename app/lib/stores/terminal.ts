@@ -6,6 +6,9 @@ import { coloredText } from '~/utils/terminal';
 import { newVercelShellProcess, VercelShell } from '~/lib/sandbox/vercel-terminal';
 import type { SandboxProvider } from '~/lib/sandbox/types';
 import { workbenchStore } from './workbench';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('TerminalStore');
 
 export class TerminalStore {
   #webcontainer: Promise<WebContainer>;
@@ -122,7 +125,7 @@ export class TerminalStore {
       try {
         process.kill();
       } catch (error) {
-        console.warn('Failed to kill terminal process:', error);
+        logger.warn('Failed to kill terminal process', { error });
       }
       this.#terminals.splice(terminalIndex, 1);
     }

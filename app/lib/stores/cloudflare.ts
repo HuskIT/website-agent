@@ -2,6 +2,9 @@ import { atom } from 'nanostores';
 import type { CloudflareConnection } from '~/types/deployment';
 import { logStore } from './logs';
 import { toast } from 'react-toastify';
+import { createScopedLogger } from '~/utils/logger';
+
+const logger = createScopedLogger('CloudflareStore');
 
 // Initialize with stored connection only
 const storedConnection = typeof window !== 'undefined' ? localStorage.getItem('cloudflare_connection') : null;
@@ -57,7 +60,7 @@ export async function initializeCloudflareConnection() {
 
     await fetchCloudflareStats();
   } catch (error) {
-    console.error('Error initializing Cloudflare connection:', error);
+    logger.error('Error initializing Cloudflare connection', { error });
     logStore.logError('Failed to initialize Cloudflare connection', { error });
   } finally {
     isConnecting.set(false);
@@ -89,7 +92,7 @@ export async function fetchCloudflareStats() {
       stats: data.stats,
     });
   } catch (error) {
-    console.error('Cloudflare API Error:', error);
+    logger.error('Cloudflare API Error', { error });
     logStore.logError('Failed to fetch Cloudflare stats', { error });
     toast.error('Failed to fetch Cloudflare statistics');
   } finally {

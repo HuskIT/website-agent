@@ -627,38 +627,25 @@ export class WorkbenchStore {
      * If a Vercel snapshot exists, restore from it instead of reconnecting
      * This is much faster (5-10s vs 70-100s) because node_modules are already installed
      */
-    console.log('🔥🔥🔥 Snapshot check condition:', {
-      providerType,
-      userId,
-      condition: providerType === 'vercel' && !!userId,
-    });
 
     if (providerType === 'vercel' && userId) {
       try {
         logger.info('Checking for Vercel snapshot before reconnect', { projectId, userId });
-        console.log('🚀 Checking for Vercel snapshot before reconnect');
 
         // Fetch latest snapshot via API (client-side can't access server-only modules)
-        console.log('🔥🔥🔥 Fetching snapshot from API:', `/api/projects/${projectId}/snapshot`);
-
         const snapshotResponse = await fetch(`/api/projects/${projectId}/snapshot`);
-        console.log('🔥🔥🔥 Snapshot API response:', {
-          status: snapshotResponse.status,
-          ok: snapshotResponse.ok,
-        });
 
         if (!snapshotResponse.ok) {
-          console.log('ℹ️ No snapshot found, will try reconnect');
+          logger.debug('No snapshot found, will try reconnect');
         } else {
           const latestSnapshot = (await snapshotResponse.json()) as {
             id: string;
             vercel_snapshot_id?: string | null;
             files?: Record<string, any>;
           };
-          console.log('🔥🔥🔥 Snapshot data received:', {
+          logger.debug('Snapshot data received', {
             id: latestSnapshot.id,
             hasVercelSnapshotId: !!latestSnapshot.vercel_snapshot_id,
-            vercelSnapshotId: latestSnapshot.vercel_snapshot_id,
           });
 
           if (latestSnapshot?.vercel_snapshot_id) {
@@ -666,7 +653,7 @@ export class WorkbenchStore {
               projectId,
               vercelSnapshotId: latestSnapshot.vercel_snapshot_id,
             });
-            console.log('🚀 Found Vercel snapshot:', latestSnapshot.vercel_snapshot_id);
+            logger.info('Found Vercel snapshot', { vercelSnapshotId: latestSnapshot.vercel_snapshot_id });
 
             this.loadingStatus.set('Restoring from snapshot...');
 
@@ -690,7 +677,6 @@ export class WorkbenchStore {
                 projectId,
                 newSandboxId: data.sandboxId,
               });
-              console.log('🚀 Successfully restored from Vercel snapshot:', data.sandboxId);
 
               /*
                * Create provider for the restored sandbox
@@ -786,7 +772,6 @@ export class WorkbenchStore {
                 projectId,
                 status: response.status,
               });
-              console.log('⚠️ Vercel snapshot restore failed, falling back to reconnect');
             }
           }
         }
@@ -796,7 +781,6 @@ export class WorkbenchStore {
           projectId,
           error,
         });
-        console.log('⚠️ Error checking Vercel snapshot:', error);
       }
     }
 
