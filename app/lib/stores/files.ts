@@ -186,7 +186,7 @@ export class FilesStore {
    * @param manager The FileSyncManager instance or null to disable syncing
    */
   setFileSyncManager(manager: FileSyncManager | null): void {
-    logger.info(`[FilesStore:${this.#instanceId}] setFileSyncManager`, {
+    logger.debug(`[FilesStore:${this.#instanceId}] setFileSyncManager`, {
       managerExists: !!manager,
       pendingCount: this.#pendingSyncs.size,
     });
@@ -196,7 +196,7 @@ export class FilesStore {
     if (manager) {
       // Flush pending syncs
       if (this.#pendingSyncs.size > 0) {
-        logger.info(`[FilesStore:${this.#instanceId}] Flushing ${this.#pendingSyncs.size} pending file syncs`);
+        logger.debug(`[FilesStore:${this.#instanceId}] Flushing ${this.#pendingSyncs.size} pending file syncs`);
 
         for (const [path, content] of this.#pendingSyncs.entries()) {
           manager.queueWrite(path, content);
@@ -985,15 +985,14 @@ export class FilesStore {
       const syncContent = isBinary ? contentStr : (finalContent as string) || ' ';
 
       if (this.#fileSyncManager) {
-        logger.info(`[FilesStore:${this.#instanceId}] Queuing write for ${relativePath}`, {
-          hasManager: true,
+        logger.debug(`[FilesStore:${this.#instanceId}] Queuing write for ${relativePath}`, {
           contentLength: syncContent.length,
         });
 
         this.#fileSyncManager.queueWrite(relativePath, syncContent);
       } else {
         // Buffer the write until manager is available
-        logger.info(`[FilesStore:${this.#instanceId}] Buffering write for ${relativePath} (no manager yet)`);
+        logger.debug(`[FilesStore:${this.#instanceId}] Buffering write for ${relativePath} (no manager yet)`);
         this.#pendingSyncs.set(relativePath, syncContent);
       }
 

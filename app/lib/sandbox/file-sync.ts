@@ -113,11 +113,6 @@ export class FileSyncManager {
     // Store content for the write (using a separate map)
     this._pendingContent.set(path, content);
 
-    // Debounce the actual sync
-    logger.debug(`queueWrite called for ${path}`, {
-      pendingCount: this._state.pendingWrites.length,
-      hasProvider: !!this._provider,
-    });
     this._scheduleSync();
   }
 
@@ -227,20 +222,7 @@ export class FileSyncManager {
   }
 
   private async _performSync(): Promise<void> {
-    logger.debug('_performSync called', {
-      hasProvider: !!this._provider,
-      pendingWrites: this._state.pendingWrites.length,
-      providerStatus: this._provider?.status,
-      providerType: this._provider?.type,
-    });
-
     if (!this._provider || this._provider.status !== 'connected' || this._state.pendingWrites.length === 0) {
-      logger.debug('Skipping sync - no provider, not connected, or no pending writes', {
-        hasProvider: !!this._provider,
-        providerStatus: this._provider?.status,
-        pendingWrites: this._state.pendingWrites.length,
-      });
-
       // If provider is not connected, signal failure so workbench can handle it
       if (this._provider && this._provider.status !== 'connected' && this._state.pendingWrites.length > 0) {
         const batch = this._state.pendingWrites.splice(0, this._config.maxBatchSize);
@@ -280,18 +262,12 @@ export class FileSyncManager {
       return;
     }
 
-    logger.debug('Writing files to provider', {
-      fileCount: files.length,
-      paths: files.map((f) => f.path),
-    });
-
     // Perform the sync with retries
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < this._config.maxRetries; attempt++) {
       try {
         await this._provider.writeFiles(files);
-        logger.debug('Files written successfully', { fileCount: files.length });
 
         // Success - update synced timestamps
         const now = Date.now();
@@ -309,9 +285,6 @@ export class FileSyncManager {
 
         // If there are more pending files, process them immediately (no debounce)
         if (this._state.pendingWrites.length > 0) {
-          logger.debug('More files pending, processing next batch immediately', {
-            remaining: this._state.pendingWrites.length,
-          });
           setTimeout(() => this._performSync(), 0);
         }
 
