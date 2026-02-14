@@ -11,13 +11,15 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 // Load environment variables from multiple files
-// Load environment variables from multiple files
 dotenv.config({ path: '.env.local' });
 dotenv.config({ path: '.env' });
 dotenv.config();
 
-// FORCE CACHE INVALIDATION: v3
+// FORCE CACHE INVALIDATION: v4
 export default defineConfig((config) => {
+  const isSsrBuild = config.isSsrBuild === true;
+  const isBuildCommand = config.command === 'build';
+
   return {
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
@@ -27,7 +29,8 @@ export default defineConfig((config) => {
         '@smithy/core/dist-es/getSmithyContext': '/test/stubs/smithy-get.ts',
         '@smithy/core/dist-es': '/test/stubs/smithy-index.ts',
       },
-      // Prevent esbuild from trying to resolve node: protocol imports
+      // Keep shared resolve behavior here; SSR-specific behavior is controlled
+      // under `ssr.resolve` to avoid changing global build/runtime resolution.
       conditions: ['import', 'module', 'browser', 'default'],
     },
     server: {
@@ -64,7 +67,8 @@ export default defineConfig((config) => {
       },
     },
     plugins: [
-      nodePolyfills({
+      // Only apply browser polyfills for client builds — SSR uses native Node.js globals
+      !isSsrBuild && nodePolyfills({
         include: ['buffer', 'process', 'util', 'stream'],
         globals: {
           Buffer: true,
@@ -259,7 +263,35 @@ export default defineConfig((config) => {
     ],
     ssr: {
       // Don't apply browser polyfills in SSR - use native Node.js modules
-      external: ['path', 'fs', 'fs/promises', 'util', 'util/types', 'undici'],
+      external: [
+        'path',
+        'fs',
+        'fs/promises',
+        'util',
+        'util/types',
+        'undici',
+        // Prevent browser process/buffer shims from shadowing native Node.js globals
+        'vite-plugin-node-polyfills/shims/process',
+        'vite-plugin-node-polyfills/shims/buffer',
+      ],
+
+      // NOTE: Keep SSR resolution behavior explicit here (not in top-level
+      // `resolve.conditions`) so we don't unintentionally change production
+      // dependency resolution.
+      resolve: {
+        // Keep SSR conditions runtime-oriented (workerd/worker first),
+        // without forcing browser-first package resolution in server code.
+        conditions: ['workerd', 'worker', 'import', 'module', 'default'],
+        // Externalized SSR deps in dev use this set; include `node` fallback
+        // for packages that don't publish worker-specific condition entries.
+        externalConditions: ['workerd', 'worker', 'node'],
+      },
+
+      // Bundle react-dom so Vite can transform the CJS wrapper in SSR build.
+      // In dev, this can cause `server.browser.js` to be executed with `require`
+      // missing depending on external conditions. We keep it enabled for builds
+      // and fall back to external loading during dev.
+      noExternal: isBuildCommand ? ['react-dom'] : [],
     },
     css: {
       preprocessorOptions: {

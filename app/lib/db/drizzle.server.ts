@@ -58,8 +58,11 @@ if (typeof globalThis !== 'undefined' && typeof process !== 'undefined' && proce
   }
 }
 
-// Ensure we're in a Node.js environment before importing postgres-js
-if (typeof process === 'undefined' || !process.versions?.node) {
+// Ensure we're in a Node.js-like environment before importing postgres-js
+// Note: the process.versions check is skipped because vite-plugin-node-polyfills
+// injects a browser shim that shadows the native process global in the SSR bundle.
+// The .server.ts suffix already ensures this file only runs on the server.
+if (typeof globalThis === 'undefined') {
   throw new Error(
     'Database connection requires Node.js environment. ' + 'postgres-js does not support Cloudflare Workers runtime.',
   );
