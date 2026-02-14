@@ -619,16 +619,7 @@ export class WorkbenchStore {
               this.#startUserActivityTracking();
 
               // Auto-start dev server (packages already installed!)
-              if (latestSnapshot.files) {
-                await this.#autoStartDevServer(
-                  Object.fromEntries(
-                    Object.entries(latestSnapshot.files).filter(([_, f]) => f?.type === 'file') as [
-                      string,
-                      { content: string; isBinary: boolean },
-                    ][],
-                  ),
-                );
-              }
+              await this.#autoStartDevServer();
 
               this.loadingStatus.set(null);
 
@@ -1780,7 +1771,7 @@ export class WorkbenchStore {
         // Fire-and-forget: install deps + start dev server
         logger.debug('[DEBUG restoreFromDatabaseSnapshot] Calling #autoStartDevServer');
         this.loadingStatus.set('Starting Preview...');
-        await this.#autoStartDevServer(snapshot.files);
+        await this.#autoStartDevServer();
       } else {
         logger.warn('[DEBUG restoreFromDatabaseSnapshot] SKIPPED upload: sandboxProvider is null');
       }
@@ -1815,7 +1806,7 @@ export class WorkbenchStore {
    * the dev server. Vite projects get `-- --host` so the server binds to 0.0.0.0
    * (required for Vercel Sandbox port proxying).
    */
-  async #autoStartDevServer(files: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
+  async #autoStartDevServer(_files?: Record<string, { content: string; isBinary: boolean }>): Promise<void> {
     logger.debug('[DEBUG #autoStartDevServer] Starting auto-start process');
 
     const provider = this.#sandboxProvider;
@@ -1826,99 +1817,38 @@ export class WorkbenchStore {
     }
 
     logger.debug('[DEBUG #autoStartDevServer] Provider available:', { type: provider.type, status: provider.status });
-
-    const pkgRaw = files['package.json'];
-
-    if (!pkgRaw) {
-      logger.warn('[autoStartDevServer] No package.json in snapshot – skipping auto-start');
-      logger.warn('[DEBUG #autoStartDevServer] No package.json found');
-
-      return;
-    }
-
-    logger.debug('[DEBUG #autoStartDevServer] Found package.json');
-
-    let pkg: { scripts?: Record<string, string> };
+    logger.info('[autoStartDevServer] Running npm install then starting dev server');
 
     try {
-      pkg = JSON.parse(pkgRaw.content);
-    } catch {
-      logger.warn('[autoStartDevServer] Failed to parse package.json – skipping auto-start');
-      return;
-    }
-
-    const scripts = pkg.scripts || {};
-
-    // Pick the best run script: dev > start
-    const scriptName = scripts.dev ? 'dev' : scripts.start ? 'start' : null;
-
-    if (!scriptName) {
-      logger.warn('[autoStartDevServer] No dev or start script found – skipping auto-start');
-      return;
-    }
-
-    logger.info(`[autoStartDevServer] Running npm install then npm run ${scriptName}`);
-    logger.debug('[DEBUG #autoStartDevServer] About to run npm install with sandbox:', {
-      sandboxId: provider.sandboxId,
-      providerType: provider.type,
-      providerStatus: provider.status,
-    });
-
-    try {
-      /*
-       * Await install so dependencies are available before starting the server
-       * Use retry wrapper to handle sandbox expiration during long-running install
-       */
-      logger.debug('[DEBUG #autoStartDevServer] Calling #runCommandWithRetry for npm install...');
+      // Always run npm install first (packages might be missing)
+      logger.debug('[DEBUG #autoStartDevServer] Running npm install...');
 
       const installResult = await this.#runCommandWithRetry('npm', ['install', '--no-audit', '--no-fund', '--silent']);
-      logger.debug('[DEBUG #autoStartDevServer] npm install completed:', {
-        exitCode: installResult.exitCode,
-        stdout: installResult.stdout?.substring(0, 500),
-        stderr: installResult.stderr?.substring(0, 500),
-      });
 
       if (installResult.exitCode !== 0) {
         logger.error('[autoStartDevServer] npm install failed', {
           exitCode: installResult.exitCode,
-          stdout: installResult.stdout,
-          stderr: installResult.stderr,
+          stderr: installResult.stderr?.substring(0, 500),
         });
-        logger.error('[DEBUG #autoStartDevServer] npm install failed:', {
-          exitCode: installResult.exitCode,
-          stdout: installResult.stdout,
-          stderr: installResult.stderr,
-        });
-
         return;
       }
 
-      logger.debug('[DEBUG #autoStartDevServer] npm install succeeded');
-
-      logger.info('[autoStartDevServer] npm install succeeded, starting server…');
       logger.debug('[DEBUG #autoStartDevServer] npm install succeeded, starting dev server');
 
       /*
-       * Determine if this is a Vite project – if so, append --host so the dev
-       * server binds to 0.0.0.0 (needed for Vercel Sandbox port proxy).
+       * Always try "npm run dev" first with --host for Vite compatibility
+       * If that fails, the error will be logged but we won't block
        */
-      const isVite = (scripts[scriptName] || '').includes('vite');
-      const devArgs = isVite ? ['-c', `npm run ${scriptName} -- --host`] : ['-c', `npm run ${scriptName}`];
+      const devArgs = ['-c', 'npm run dev -- --host'];
 
-      logger.debug('[DEBUG #autoStartDevServer] Starting dev server:', { isVite, scriptName, devArgs });
+      logger.debug('[DEBUG #autoStartDevServer] Starting dev server with:', { devArgs });
 
-      /*
-       * Fire-and-forget: do NOT await – dev servers run indefinitely.
-       * The preview polling in Preview.tsx will detect when the port is ready.
-       * NOTE: Browser console errors (runtime errors) are NOT captured here.
-       * They occur in the iframe and require a different mechanism to capture.
-       */
+      // Fire-and-forget: do NOT await – dev servers run indefinitely
       provider.runCommand('sh', devArgs).catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const is410 = msg.includes('410') || msg.includes('SANDBOX_EXPIRED');
 
         if (is410) {
-          // Sandbox expired — show notification, user must click Restart (no auto-recreation)
           logger.info('Dev server: sandbox expired — showing notification');
           this.actionAlert.set({
             type: 'warning',
@@ -1926,13 +1856,19 @@ export class WorkbenchStore {
             description: 'Your preview session has ended. Click Restart to continue.',
             content: '',
           });
-        } else if (!is410) {
-          logger.error('Dev server command failed unexpectedly', { error: msg });
+        } else {
+          logger.warn('Dev server command failed (may need npm start instead)', { error: msg });
+
+          // Try npm start as fallback
+          provider.runCommand('sh', ['-c', 'npm start']).catch((fallbackError) => {
+            logger.error('Dev server fallback (npm start) also failed', { error: fallbackError });
+          });
         }
       });
+
       logger.debug('[DEBUG #autoStartDevServer] Dev server command fired (fire-and-forget)');
 
-      // NOW register previews — dev server is starting, so the iframe can begin polling
+      // Register previews — dev server is starting, so the iframe can begin polling
       const previewUrls = provider.getPreviewUrls();
 
       for (const [port, url] of previewUrls) {
@@ -1940,14 +1876,7 @@ export class WorkbenchStore {
         this.#previewsStore.registerPreview(port, url, 'vercel');
       }
     } catch (error) {
-      const errorDetails = {
-        message: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : undefined,
-        raw: error,
-      };
-      logger.error('[autoStartDevServer] Error during auto-start', { error: errorDetails });
-      logger.error('[DEBUG #autoStartDevServer] Error during auto-start:', errorDetails);
+      logger.error('[autoStartDevServer] Error during auto-start', { error });
     }
   }
 
