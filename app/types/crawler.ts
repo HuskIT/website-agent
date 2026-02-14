@@ -281,7 +281,13 @@ export interface CrawlWebsiteMarkdownResponse {
   /** Google Place ID */
   place_id?: string;
 
-  /** Response data (only present on success) */
+  /**
+   * Markdown content with visual style descriptions (top-level in actual API response)
+   * NOTE: The actual Crawler API returns markdown at the top level, not nested in 'data'
+   */
+  markdown?: string;
+
+  /** Response data (legacy structure - kept for backwards compatibility) */
   data?: {
     /** Markdown content with visual style descriptions */
     markdown: string;

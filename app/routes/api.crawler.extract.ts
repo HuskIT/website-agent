@@ -296,10 +296,11 @@ export async function action({ request }: ActionFunctionArgs) {
         : undefined;
 
     const websiteMarkdown =
-      websiteMarkdownResult.status === 'fulfilled' &&
-      websiteMarkdownResult.value.success &&
-      'data' in websiteMarkdownResult.value
-        ? websiteMarkdownResult.value.data?.markdown
+      websiteMarkdownResult.status === 'fulfilled' && websiteMarkdownResult.value.success
+        ? // Check both possible response structures (top-level markdown OR nested in data)
+          ('markdown' in websiteMarkdownResult.value && websiteMarkdownResult.value.markdown) ||
+          ('data' in websiteMarkdownResult.value && websiteMarkdownResult.value.data?.markdown) ||
+          undefined
         : undefined;
 
     // Log results with graceful degradation messaging

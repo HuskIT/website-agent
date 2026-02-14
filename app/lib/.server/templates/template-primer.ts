@@ -120,27 +120,57 @@ ${profileData}
 
 ---`);
 
+  // Single-file generation requirement (CRITICAL)
+  parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗
+║                                                                               ║
+║                   ⚠️  CRITICAL: SINGLE FILE OUTPUT ONLY  ⚠️                   ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+YOU MUST GENERATE EXACTLY ONE FILE: src/data/content.ts
+
+✓ ALLOWED:
+  - Generate ONLY src/data/content.ts with business data
+  - Export a single TypeScript object containing all content
+
+❌ FORBIDDEN:
+  - Generating multiple files (src/App.tsx, components/*, etc.)
+  - Modifying template structure files
+  - Creating new component files
+  - Generating package.json, config files, or any other files
+
+⚠️  WARNING: If you generate MORE THAN ONE FILE, your response will be REJECTED
+and the entire generation will be retried. This is a strict validation rule.
+
+The template structure is already complete and perfect. Your ONLY job is to
+generate src/data/content.ts with the business-specific content data.
+
+---`);
+
   // Customization instructions
   parts.push(`CUSTOMIZATION TASK:
 
-The ${templateName} template has been imported above. Your task is to CUSTOMIZE this existing template for "${businessName}".
+The ${templateName} template has been imported above. Your task is to generate ONLY the src/data/content.ts file for "${businessName}".
 
 CRITICAL INSTRUCTIONS:
-1. DO NOT generate new boilerplate code - the template already has the complete structure
-2. MODIFY existing files to inject the business data provided above
-3. Replace ALL placeholder text with actual business information:
-   - Update the restaurant name in headers, footers, and meta tags
-   - Update contact information (address, phone, hours)
-   - Customize the hero section with business-specific copy
-   - Update the About section with business story/description
-   - Populate the Menu section with actual menu items if provided
-   - Update the Contact section with real contact details
+1. Generate EXACTLY ONE FILE: src/data/content.ts
+2. This file should export a TypeScript object containing all business content:
+   - Business identity (name, tagline, description)
+   - Contact information (address, phone, hours)
+   - Hero section content
+   - About section content
+   - Menu items and categories
+   - Reviews and testimonials
+   - Any other content data from the business profile
 
-4. PRESERVE the template's design patterns, component structure, and styling
-5. Focus on content customization, not structural changes
-6. Generate ONLY the files that need modifications - do not regenerate unchanged files
+3. Use the business data provided above to populate the content object
+4. Follow the template's existing content.ts structure if visible
+5. DO NOT generate any other files - the template structure is complete
+6. DO NOT modify any existing template files
 
-Begin customizing the template now.`);
+REMEMBER: Output ONLY src/data/content.ts. Any other files will cause rejection.
+
+Begin generating the content.ts file now.`);
 
   // Format reminder - CRITICAL for parser compatibility - positioned LAST for recency effect
   parts.push(`## OUTPUT FORMAT - FINAL REMINDER
