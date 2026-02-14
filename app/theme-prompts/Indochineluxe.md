@@ -65,7 +65,7 @@ _Focus on the "Elegance" and "Culture" of these modules._
 2.  **Tone:** Sophisticated, nostalgic, sensory. Use words like _Aromatic, Heritage, Crafted, Essence, Umami._
 3.  Include **Image Prompts** (Focus on dramatic lighting, dark ceramics, gold accents, steam).
 4.  **SEO:** Define Page Titles, Meta Descriptions, and Semantic H-tags.
-5.  **Data:** Consolidate all text/links into a simplified `data/content.ts` block at the end.
+5.  **Data:** Consolidate all text/links into a simplified `public/locales/en/translation.json` block at the end.
 
 ### **Content Structure (Markdown)**
 
@@ -95,106 +95,84 @@ _Focus on the "Elegance" and "Culture" of these modules._
 
 ---
 
-## 6. DATA STRUCTURE (`data/content.ts`)
+## 6. DATA STRUCTURE (`public/locales/en/translation.json`)
 
-You are a content generator for a restaurant/food business website. You will be given business information and a set of images, and must produce a TypeScript content file (`content.ts`) that exactly matches the structure below, but with all values customized to the provided business.
+You are a content generator for a restaurant/food business website. You will be given business information and a set of images, and must produce a JSON translation file (`translation.json`) that exactly matches the structure below, but with all values customized to the provided business.
+
+**Ordering Rule:** All first-level keys must be ordered alphabetically, with the exception of `static_assets`, which must always be the final key.
 
 ### STRUCTURE REFERENCE
 
-The output file has **three individually exported objects** (`siteText`, `siteAssets`, `siteComplexContent`) and a final combined export. Below is the complete schema.
+The output is a single JSON object containing the following top-level keys:
 
-#### `siteText` (exported as `export const siteText`)
+#### `branding`
+- `name` (string, required) — Business name.
+- `slogan` (string, required) — 1 sentence brand slogan.
 
-##### `seo`
-- `title` (string, required) — Page title. Format: `"[Business Name] | [Short Description]"`. Example: `"Indochine Luxe | Contemporary Vietnamese Cuisine"`
-- `description` (string, required) — 1–2 sentence SEO description.
+#### `common`
+- `connect` (string, required) — Label string.
+- `contact` (string, required) — Label string.
+- `email` (string, required) — Label string.
+- `hours` (string, required) — Label string.
+- `location` (string, required) — Label string.
+- `name` (string, required) — Label string.
+- `fullName` (string, required) — Label string.
+- `phoneNumber` (string, required) — Label string.
 
-##### `branding`
-- `name` (string, required) — Business name. Example: `"Indochine Luxe"`
-- `slogan` (string, required) — 1 sentence brand slogan. Example: `"A culinary journey through the soul of Saigon, where heritage meets artistry."`
+#### `footer`
+- `address` (object, required):
+  - `line1` (string, required) - Street address.
+  - `line2` (string, required) - District/area.
+  - `line3` (string, required) - Country.
+- `hours` (array, required) - 2–4 elements. Each is a set of operating hours, including closed days.
 
-##### `common`
-- `connect` (string, required) — Label string. Example: `"Connect"`
-- `contact` (string, required) — Label string. Example: `"Contact"`
-- `dressCode` (string, required) — Label string. Example: `"Dress Code"`
-- `dressCodeDescription` (string, required) — 1–2 sentences describing the dress code. Example: `"Smart elegant. We politely ask that gentlemen wear long trousers and covered shoes."`
-- `email` (string, required) — Label string. Example: `"Email"`
-- `hours` (string, required) — Label string. Example: `"Hours"`
-- `location` (string, required) — Label string. Example: `"Location"`
-- `name` (string, required) — Label string. Example: `"Name"`
-- `fullName` (string, required) — Label string. Example: `"Full Name"`
-- `phoneNumber` (string, required) — Label string. Example: `"Phone Number"`
-
-##### `navigations` — exactly 5 elements, in this exact order
-
-**Note the plural key name: `navigations`, not `navigation`.**
-
-Each element has:
-- `label` (string, required) — Display text. Customizable. Title case. 1–3 words.
-- `path` (string, required) — **IMMUTABLE route value. Do not change.**
-- `isCtaButton` (boolean, optional) — Only present on the last element. Must be `true`.
-
-**Element 0:**
-- `path`: `"/"` (immutable)
-- `label`: Home page link (e.g., `"Home"`)
-
-**Element 1:**
-- `path`: `"/menu"` (immutable)
-- `label`: Menu page link (e.g., `"Menu"`)
-
-**Element 2:**
-- `path`: `"/story"` (immutable)
-- `label`: Heritage/story page link (e.g., `"Heritage"`, `"Our Story"`)
-
-**Element 3:**
-- `path`: `"/gallery"` (immutable)
-- `label`: Gallery page link (e.g., `"Gallery"`)
-
-**Element 4:**
-- `path`: `"/reservations"` (immutable)
-- `isCtaButton`: `true` (immutable)
-- `label`: Reservation CTA (e.g., `"Reservations"`, `"Book a Table"`)
-
-##### `hero`
-- `eyebrow` (string, required) — Small text above headline. 2–5 words. Example: `"Contemporary Vietnamese Cuisine"`
-- `headline` (string, required) — Bold headline, 3–6 words. Example: `"The Soul of Saigon"`
-- `subhead` (string, required) — 1 sentence supporting the headline.
-- `cta` (object, required):
-  - `label` (string, required) — CTA button text. Example: `"Discover"`
-  - `link` (string, required) — **IMMUTABLE. Must always be `"/menu"`.**
-- `backgroundImage` (object, required):
-  - `alt` (string, required) — Alt text for the hero image. Derived from the chosen image's description.
-  - `src` (string, required) — **Image URL from `INPUT IMAGES`.** Choose a landscape-oriented, visually dramatic image.
-- `imagePrompt` (string, required) — Descriptive image generation prompt. 1–2 sentences describing ideal composition, lighting, mood.
-
-##### `menuHighlights`
-- `heading` (string, required) — Section heading. 2–3 words. Example: `"Chef's Signatures"`
-- `subhead` (string, required) — 1–2 sentences.
-- `items` (array, required) — **Exactly 4 elements.** Each is a featured dish.
-
-  Each item has:
-  - `name` (string, required) — Dish name, title case. Include original language name if relevant. 2–5 words. Example: `"Wagyu Phở Bò"`
-  - `price` (string, required) — Price as string **without currency symbol**. Example: `"48"`, `"32"`
-  - `description` (string, required) — 1–2 sentences. Poetic, evocative, listing key ingredients and ending with a mood phrase. Example: `"Australian Wagyu, 24-hour bone broth, charred onion, star anise. The essence of patience."`
-  - `imagePrompt` (string, required) — Image generation prompt for this dish. 1 sentence.
-  - `imageSrc` (string, required) — **Image URL from `INPUT IMAGES`.** Match by description relevance.
-
-- `cta` (object, required):
-  - `label` (string, required) — CTA button text. Example: `"View Full Menu"`
-  - `link` (string, required) — **IMMUTABLE. Must always be `"/menu"`.**
-
-##### `fullMenu` — array of 3 to 5 category objects
-
+#### `fullMenu` - array of 3 to 5 category objects
 Each category has:
-- `category` (string, required) — Category name, title case. Example: `"Starters"`, `"Mains"`, `"Soups & Noodles"`, `"Desserts"`
-- `items` (array, required) — **3–5 elements.** Each is a dish.
-
+- `category` (string, required) - Category name, title case (e.g., `"Starters"`, `"Mains"`, `"Soups & Noodles"`, `"Desserts"`).
+- `items` (array, required) - 3–5 elements. Each is a dish, which has `name`, `price` (string), and `description`.
   Each item has:
-  - `name` (string, required) — Dish name, title case. Include original language name in parentheses if relevant. Example: `"Shaking Beef (Bò Lúc Lắc)"`
-  - `price` (string, required) — Price as string **without currency symbol**. Example: `"46"`
-  - `description` (string, required) — 1 sentence listing ingredients and preparation.
+  - `name` (string, required) - Dish name, title case. Include original language name in parentheses if relevant. Example: `"Shaking Beef (Bò Lúc Lắc)"`
+  - `price` (string, required) - Price as string **without currency symbol**. Example: `"46"`
+  - `description` (string, required) - 1 sentence listing ingredients and preparation.
 
-##### `ingredients`
+#### `gallery`
+- `heading` (string, required) - Section heading.
+- `subhead` (string, required) - 1 sentence description.
+- `images` (array, required) - 7–10 elements.
+  Each image has:
+  - `prompt` (string, required) — Image generation prompt. 1 sentence.
+  - `alt` (string, required) — Concise alt text. Example: `"Velvet booth seating with brass accents"`
+- `page` (object, required):
+  - `heading` (string, required) - Gallery page title.
+  - `subhead` (string, required) - 1 sentence.
+- `cta` (object, required):
+  - `label` (string, required) — "View Gallery"
+  - `link` (string, required) — **IMMUTABLE: `"/gallery"`**.
+
+#### `heritage`
+- `heading` (string, required) — Section heading.
+- `body` (string[], required) — **Exactly 3 elements.** Each is a paragraph (2–3 sentences) forming a narrative:
+  - `body[0]`: Origin — founding story, the beginning.
+  - `body[1]`: Journey — the chef's background, philosophy, approach.
+  - `body[2]`: Sourcing — ingredient philosophy, connection to tradition.
+- `quote` (object, required):
+  - `text` (string, required) — 1 memorable quote.
+  - `author` (string, required) — Attribution with em dash prefix (e.g., `"— Chef Name"`).
+- `cta` (object, required):
+  - `label` (string, required) — "Our Philosophy"
+  - `link` (string, required) — **IMMUTABLE: `"/story"`**.
+
+#### `hero`
+- `eyebrow` (string, required) — Small text above headline.
+- `headline` (string, required) — Bold headline.
+- `subhead` (string, required) — 1 sentence supporting text.
+- `cta` (object, required):
+  - `label` (string, required) — "Discover"
+  - `link` (string, required) — **IMMUTABLE: `"/menu"`**.
+- `backgroundImageAlt` (string, required) — Alt text for the hero image.
+- `imagePrompt` (string, required) — 1–2 sentence generation prompt.
+
+#### `ingredients`
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"Sourced with Intention"`
 - `subhead` (string, required) — 1 sentence.
 - `items` (array, required) — **Exactly 3 elements.** Each is a signature ingredient.
@@ -204,211 +182,107 @@ Each category has:
   - `origin` (string, required) — Where it's sourced from. Example: `"Lạng Sơn Province"`
   - `description` (string, required) — 1 sentence about harvesting or character. Poetic.
   - `imagePrompt` (string, required) — Image generation prompt. 1 sentence.
-  - `imageSrc` (string, required) — **Image URL from `INPUT IMAGES`.** Match by description relevance.
 
-##### `heritage`
-- `heading` (string, required) — Section heading. 2–4 words. Example: `"From Our Roots"`
-- `body` (string[], required) — **Exactly 3 elements.** Each is a paragraph (2–3 sentences) forming a narrative:
-  - `body[0]`: Origin — founding story, the beginning.
-  - `body[1]`: Journey — the chef's background, philosophy, approach.
-  - `body[2]`: Sourcing — ingredient philosophy, connection to tradition.
-- `quote` (object, required):
-  - `text` (string, required) — A memorable quote. 1 sentence. Example: `"Honor the past, elevate the present."`
-  - `author` (string, required) — Attribution with em dash prefix. Example: `"— Chef Minh Trần"`
+#### `menuHighlights`
+- `heading` (string, required) — Section heading.
+- `subhead` (string, required) — 1–2 sentences.
+- `items` (array, required) — Exactly 4 dishes. Each has `name`, `price`, `description`, and `imagePrompt`.
+  Each item has:
+  - `name` (string, required) — Dish name, title case. Include original language name if relevant. 2–5 words. Example: "Wagyu Phở Bò"
+  - `price` (string, required) — Price as string without currency symbol. Example: "48", "32"
+  - `description` (string, required) — 1–2 sentences. Poetic, evocative, listing key ingredients and ending with a mood phrase. Example: "Australian Wagyu, 24-hour bone broth, charred onion, star anise. The essence of patience."
+  - `imagePrompt` (string, required) — Image generation prompt for this dish. 1 sentence.
 - `cta` (object, required):
-  - `label` (string, required) — CTA button text. Example: `"Our Philosophy"`
-  - `link` (string, required) — **IMMUTABLE. Must always be `"/story"`.**
+  - `label` (string, required) — "View Full Menu"
+  - `link` (string, required) — **IMMUTABLE: `"/menu"`**.
 
-##### `gallery`
-- `heading` (string, required) — Section heading. 2–3 words. Example: `"The Space"`
-- `subhead` (string, required) — 1 sentence describing the atmosphere.
-- `images` (array, required) — **7–10 elements.** Each is a gallery image with prompt, alt, and source.
+#### `navigations` — Exactly 5 elements in order
+Each element has `label` (customizable) and `path` (**IMMUTABLE**).
+- `navigations[0].path`: `"/"`
+- `navigations[1].path`: `"/menu"`
+- `navigations[2].path`: `"/story"`
+- `navigations[3].path`: `"/gallery"`
+- `navigations[4].path`: `"/reservations"`, also includes `"isCtaButton": true`.
 
-  Each image has:
-  - `prompt` (string, required) — Image generation prompt. 1 sentence.
-  - `alt` (string, required) — Concise alt text. Example: `"Velvet booth seating with brass accents"`
-  - `src` (string, required) — **Image URL from `INPUT IMAGES`.** Choose images showcasing interior, food, atmosphere, bar, details.
-
-- `page` (object, required):
-  - `heading` (string, required) — Gallery page title. Example: `"The Gallery"`
-  - `subhead` (string, required) — 1 sentence.
-
+#### `reservations`
+- `heading` (string, required) — "Reservations"
+- `subhead` (string, required) — Sensory caption.
+- `note` (string, required) — Note about large groups/private dining.
+- `confirmation` (string, required) — Confirmation title.
+- `confirmationEmailMsg` (string, required) — Template string with `{{email}}`.
+- `date` (string, required) — Label.
+- `dressCode` (string, required) — Label.
+- `dressCodeDescription` (string, required) — Full dress code details.
+- `time` (string, required) — Label.
+- `guests` (string, required) — Label.
+- `reservationTimes` (array, required) — Each with `label` (Display) and `value` (24h). First item must be `{ "label": "Select Time", "value": "" }`.
+- `selectTime` (string, required) — Placeholder.
+- `specialRequests` (string, required) — Label.
+- `specialRequestsPlaceholder` (string, required) — Placeholder.
+- `makeAnother` (string, required) — Reset link text.
+- `numberOfGuests` (number[], required) — Sequential guest count options (e.g., `[2, 3, 4, 5, 6, 7, 8]`).
+- `processing` (string, required) — "Processing..."
+- `confirmButton` (string, required) — "Confirm Reservation"
+- `tableRequest` (string, required) — Heading.
+- `thankYouMsg` (string, required) — Template string using `{{name}}`, `{{date}}`, and `{{time}}`. Use `<textColor>` tags for variables. Example: `"Thank you, {{name}}. We look forward to welcoming you on <textColor>{{date}}</textColor> at <textColor>{{time}}</textColor>."`
 - `cta` (object, required):
-  - `label` (string, required) — CTA button text. Example: `"View Gallery"`
-  - `link` (string, required) — **IMMUTABLE. Must always be `"/gallery"`.**
+  - `label` (string, required) — "Book Now"
+  - `link` (string, required) — **IMMUTABLE: `"/reservations"`**.
 
-##### `reservations`
-- `heading` (string, required) — Page title. Example: `"Reservations"`
-- `subhead` (string, required) — 1 sentence.
-- `note` (string, required) — 1 sentence note about private dining or large groups.
-- `confirmation` (string, required) — Short confirmation message. Example: `"Reservation confirmed."`
-- `date` (string, required) — Field label. Example: `"Date"`
-- `time` (string, required) — Field label. Example: `"Time"`
-- `guests` (string, required) — Field label. Example: `"Guests"`
-- `reservationTimes` (array, required) — **7–9 elements.** Time slot options. First element is always the placeholder.
+#### `seo`
+- `title` (string, required) — Page title. Format: `"[Business Name] | [Short Description]"`. Example: `"Indochine Luxe | Contemporary Vietnamese Cuisine"`
+- `description` (string, required) — 1–2 sentence SEO description.
 
-  Each time slot has:
-  - `label` (string, required) — Display text. Example: `"6:00 PM"`, or `"Select Time"` for the first element.
-  - `value` (string, required) — 24-hour time string. Example: `"18:00"`, or `""` for the placeholder.
+#### `static_assets`
+- `images` (object, required): **Image URL from `INPUT IMAGES`.**
+  - `gallery` (string[], 7–10 URLs): Choose images showcasing interior, food, atmosphere, bar, details.
+  - `hero`: `{ "backgroundImage": URL }`: Choose a landscape-oriented, visually dramatic image.
+  - `ingredients` (string[], 3 URLs): Match by items from `ingredients.items` description relevance.
+  - `menuHighlights` (string[], 4 URLs): Match by items from `menuHighlights.items` description relevance.
+- `contact` (object, required):
+  - `phone` (string)
+  - `email` (string)
+- `socials` (array): 2 to 4 elements
 
-  **First element must be:** `{ label: "Select Time", value: "" }`
+  Each element has:
+  - `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"Twitter"`, `"TikTok"`, `"YouTube"`.
+  - `url` (string, required) — Full URL. Format: `"https://[platform].com/[handle]"`. Use a plausible handle based on the brand name. These are demo URLs.
 
-- `selectTime` (string, required) — Placeholder label. Example: `"Select Time"`
-- `specialRequests` (string, required) — Field label. Example: `"Special Requests"`
-- `specialRequestsPlaceholder` (string, required) — Placeholder text. Example: `"Allergies, special occasions, etc."`
-- `makeAnother` (string, required) — Link text. Example: `"Make Another Reservation"`
-- `numberOfGuests` (number[], required) — **5–8 elements.** Sequential integers for guest count options. Example: `[2, 3, 4, 5, 6, 7, 8]`
-- `processing` (string, required) — Loading text. Example: `"Processing..."`
-- `confirmButton` (string, required) — Submit button label. Example: `"Confirm Reservation"`
-- `tableRequest` (string, required) — Label string. Example: `"Table Request"`
-- `cta` (object, required):
-  - `label` (string, required) — CTA button text. Example: `"Book Now"`
-  - `link` (string, required) — **IMMUTABLE. Must always be `"/reservations"`.**
-
-##### `footer`
-- `address` (object, required):
-  - `line1` (string, required) — Street address. Example: `"123 Đồng Khởi Street"`
-  - `line2` (string, required) — District/area. Example: `"District 1, Ho Chi Minh City"`
-  - `line3` (string, required) — Country. Example: `"Vietnam"`
-- `hours` (array, required) — **2–4 elements.** Each is a set of operating hours, including closed days.
-
-  Each hours entry has:
-  - `days` (string, required) — Day range. Example: `"Tuesday - Thursday"`, `"Sunday - Monday"`
-  - `time` (string, required) — Time range or `"Closed"`. Example: `"6:00 PM - 10:30 PM"`, `"Closed"`
-- `copyright` (string, required) — Copyright text. Format: `"[Business Name]. All rights reserved."`. Example: `"Indochine Luxe. All rights reserved."`
-
----
-
-#### `siteAssets` (exported as `export const siteAssets`)
-
-**Note:** `siteAssets` in this template is a flat object — no `staticAssets` wrapper.
-
-##### `contact`
-- `phone` (string, required) — Phone number with country code if applicable. Example: `"+84 28 3829 5555"`
-- `email` (string, required) — Email address. Example: `"reservations@indochineluxe.vn"`
-
-##### `socials` — 2 to 4 elements
-
-Each element has:
-- `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"Twitter"`, `"TikTok"`, `"YouTube"`.
-- `url` (string, required) — Full URL. Format: `"https://[platform].com/[handle]"`. Use a plausible handle based on the brand name. These are fictional demo URLs.
-
-**Example:**
-```ts
-socials: [
-  { platform: "Instagram", url: "https://instagram.com/indochineluxe" },
-  { platform: "Facebook", url: "https://facebook.com/indochineluxe" },
-]
-```
-
----
-
-#### `siteComplexContent` (exported as `export const siteComplexContent`)
-
-This object contains **template literal functions** used by the application. The function signatures and parameter names are fixed; only the message text should be customized to match the brand voice.
-
-- `thankyouMsg` — A function that takes `(name: string, date: string, time: string)` and returns a thank-you message using template literals. Example:
-```ts
-  thankyouMsg: (name: string, date: string, time: string) => {
-    return `Thank you, ${name}. We look forward to welcoming you on ${date} at ${time}.`;
-  }
-```
-  - **The function signature must remain exactly `(name: string, date: string, time: string)`.**
-  - **Must use template literals with `${name}`, `${date}`, `${time}` interpolation.**
-  - Only customize the surrounding message text.
-
-- `confirmationEmailMsg` — A function that takes `(email: string)` and returns a confirmation email message. Example:
-```ts
-  confirmationEmailMsg: (email: string) => {
-    return `A confirmation email has been sent to ${email}.`;
-  }
-```
-  - **The function signature must remain exactly `(email: string)`.**
-  - **Must use template literal with `${email}` interpolation.**
-  - Only customize the surrounding message text.
-
----
-
-#### Final Export
-```ts
-export const siteContent = { ...siteText, ...siteAssets, ...siteComplexContent };
-```
-
-**Merge order: `siteText` first, then `siteAssets`, then `siteComplexContent`.**
+  **Example:**
+  ```json
+  socials: [
+    { "platform": "Instagram", "url": "https://instagram.com/indochineluxe" },
+    { "platform": "Facebook", "url": "https://facebook.com/indochineluxe" },
+  ]
+  ```
 
 ---
 
 ### RULES
 
-#### Routing & Link Integrity (CRITICAL — DO NOT MODIFY)
+#### Placeholders & Formatting
+- **Placeholder Style:** Use `{{key}}` for variables.
+- **Rich Text:** In `thankYouMsg`, wrap variables in `<textColor>...</textColor>` tags.
+- **Array Layout:** Keep small arrays (like `numberOfGuests`) on a single line unless they exceed 100 characters.
 
-- **Navigation `path` values are hardcoded routes and must NOT be changed.**
-- **All `link` properties inside `cta` objects must preserve their original route values:**
-  - `hero.cta.link` must always be `"/menu"`
-  - `menuHighlights.cta.link` must always be `"/menu"`
-  - `heritage.cta.link` must always be `"/story"`
-  - `gallery.cta.link` must always be `"/gallery"`
-  - `reservations.cta.link` must always be `"/reservations"`
-- Do not invent, rename, or remove any `path` or `link` value.
-- Only `label` text may be customized.
-- The `navigations` array must contain exactly 5 items, in the order listed.
+#### Routing & Link Integrity
+- Navigation `path` and CTA `link` values are **IMMUTABLE**. Never change the hardcoded routes.
 
-#### Image Assignment (CRITICAL — USE ONLY PROVIDED IMAGES)
-
-- **Do NOT generate, fabricate, or use any image URLs not in the provided image list.** Every image URL (`src` or `imageSrc`) must come directly from `INPUT IMAGES` — copy URLs exactly, character for character.
-- **Images in this template are embedded inline within `siteText`**, not in a separate images object. Specifically:
-  - `hero.backgroundImage.src` — 1 image
-  - `menuHighlights.items[].imageSrc` — 1 per item (4 total)
-  - `ingredients.items[].imageSrc` — 1 per item (3 total)
-  - `gallery.images[].src` — 1 per gallery image (7–10 total)
+#### Image Assignment
+- **Use ONLY provided images.** Every URL in `static_assets` must come directly from the input list.
 - Use `description` and `size` metadata from each input image for intelligent placement.
 - An image may appear in multiple sections if contextually appropriate. Minimize unnecessary duplication.
 - **Never modify, append query params to, or truncate any image URL.**
 
-#### Function Signatures (CRITICAL — DO NOT MODIFY)
 
-- `siteComplexContent.thankyouMsg` must have the exact signature `(name: string, date: string, time: string)` and return a template literal using `${name}`, `${date}`, `${time}`.
-- `siteComplexContent.confirmationEmailMsg` must have the exact signature `(email: string)` and return a template literal using `${email}`.
-- Only the surrounding message text may be customized.
+#### Tone & SEO
+- **Tone:** Sophisticated, nostalgic, sensory. Match the brand personality from the business info. Write evocative, literary descriptions.
+- **SEO:** Always include proper meta descriptions and title tags.
 
-#### Content & Structure
-
-- **Preserve structure exactly.** Every key from the reference must be present. Do not add, remove, or rename keys.
-- **Use `export const` for all three objects** (`siteText`, `siteAssets`, `siteComplexContent`) and the final `siteContent`.
-- **`imagePrompt` fields** should describe the ideal photo — include composition, angle, lighting, mood, and style.
-- **Prices in `menuHighlights` and `fullMenu` are strings without currency symbol.** Example: `"48"` not `"$48"`.
-- **`menuHighlights.items` should represent dishes that also exist in `fullMenu`** categories. Names may differ slightly but should refer to the same dishes.
-- **Tone & copy**: Match the brand personality from the business info. Write evocative, literary descriptions.
-- **Output valid TypeScript only.** No markdown fences, no explanation — just the raw `.ts` file content ready to save.
-
----
-
-## OUTPUT FILE STRUCTURE
-
-The generated `content.ts` must follow this exact order:
-```ts
-export const siteText = {
-  // ... all siteText content
-};
-
-export const siteAssets = {
-  // ... all siteAssets content
-};
-
-export const siteComplexContent = {
-  thankyouMsg: (name: string, date: string, time: string) => {
-    return `...${name}...${date}...${time}...`;
-  },
-  confirmationEmailMsg: (email: string) => {
-    return `...${email}...`;
-  }
-};
-
-export const siteContent = { ...siteText, ...siteAssets, ...siteComplexContent };
-```
+#### Output Protocol
+- Always output valid JSON only. Preserve the exact key hierarchy and ordering.
 
 Note: This template does NOT use any `lucide-react` icons. Do not add any import statements.
-
 ---
 
 ## OUTPUT FORMAT - CRITICAL
