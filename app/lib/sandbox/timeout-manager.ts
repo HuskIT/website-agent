@@ -3,8 +3,14 @@
  * Feature: 001-sandbox-providers
  *
  * Manages sandbox session timeouts with simple extension logic:
- * - +3 minutes when user sends a prompt (enter)
- * - +2 minutes if user was active in the last 2 minutes
+ * - +3 minutes when user sends a prompt (always extends)
+ * - +2 minutes if user is active DURING the final 2 minutes before expiration
+ *
+ * Example: For 10-minute timeout
+ * - Session expires at T=10min
+ * - Danger zone: T=8min to T=10min (final 2 minutes)
+ * - Only extends if user is active during this danger zone
+ * - Extension resets timeout counter to prevent excessive extends without acknowledgment
  */
 
 import type { SandboxProvider } from './types';
@@ -79,19 +85,22 @@ const DEFAULT_CONFIG: Partial<TimeoutManagerConfig> = {
   minAutoExtendIntervalMs: 60 * 1000, // 1 minute
 };
 
-// Simple extension rules
+// Smart extension rules
 const EXTENSION_RULES = {
   prompt: 3 * 60 * 1000, // +3 minutes on prompt
-  active: 2 * 60 * 1000, // +2 minutes if active in last 2 minutes
-  activityWindow: 2 * 60 * 1000, // Look at last 2 minutes for activity
+  active: 2 * 60 * 1000, // +2 minutes if active during danger zone
+  activityWindow: 2 * 60 * 1000, // Danger zone = final 2 minutes before expiration
 };
 
 /**
  * TimeoutManager handles sandbox session timeout tracking and management.
  *
- * Simple extension strategy:
- * - +3 minutes when user sends a prompt
- * - +2 minutes if user was active in last 2 minutes
+ * Smart extension strategy:
+ * - +3 minutes when user sends a prompt (immediate extend)
+ * - +2 minutes when user is active during the "danger zone" (final 2 minutes before expiration)
+ *
+ * This prevents excessive automatic extensions and ensures users are aware when sessions extend.
+ * The danger zone approach only extends when users are actively using the sandbox near expiration.
  */
 export class TimeoutManager {
   private _config: TimeoutManagerConfig;
@@ -396,7 +405,13 @@ export class TimeoutManager {
   /**
    * Simple auto-extend logic:
    * - +3 minutes on prompt (user sends message)
-   * - +2 minutes if user was active in last 2 minutes
+   * - +2 minutes if user was active DURING the final 2 minutes before expiration (danger zone)
+   *
+   * Example: For 10-minute timeout
+   * - Session expires at T=10min
+   * - Danger zone is T=8min to T=10min (final 2 minutes)
+   * - Only extends if user is active during this danger zone
+   * - Extension resets the timeout counter to prevent excessive extends
    */
   private _maybeAutoExtend(activityType: ActivityRecord['type']): void {
     if (!this._config.autoExtend || this._state.autoExtendPaused || !this._config.requestExtend) {
@@ -414,15 +429,17 @@ export class TimeoutManager {
     let extensionDuration = 0;
     let reason = '';
 
-    // Rule 1: +3 minutes on prompt
+    // Rule 1: +3 minutes on prompt (always extend on user message)
     if (activityType === 'prompt') {
       extensionDuration = EXTENSION_RULES.prompt;
       reason = 'User sent prompt (+3 min)';
-    }
-    // Rule 2: +2 minutes if active in last 2 minutes
-    else if (this._wasActiveInWindow(EXTENSION_RULES.activityWindow)) {
+    } else if (this._isInDangerZone() && this._wasActiveInDangerZone()) {
+      /*
+       * Rule 2: +2 minutes ONLY if we're in the danger zone AND user is active
+       * Danger zone = final 2 minutes before timeout
+       */
       extensionDuration = EXTENSION_RULES.active;
-      reason = 'User active in last 2 min (+2 min)';
+      reason = 'User active in danger zone (final 2 min) (+2 min)';
     }
 
     if (extensionDuration === 0) {
@@ -431,13 +448,14 @@ export class TimeoutManager {
 
     logger.info('Auto-extending session', {
       duration: extensionDuration / 60000,
+      timeRemaining: this._state.timeRemainingMs / 60000,
       reason,
     });
 
     this.requestExtension(extensionDuration)
       .then((success) => {
         if (success) {
-          logger.info('Extension successful', {
+          logger.info('Extension successful - timeout counter reset', {
             duration: extensionDuration / 60000,
             newTimeRemaining: this._state.timeRemainingMs / 60000,
           });
@@ -451,7 +469,29 @@ export class TimeoutManager {
   }
 
   /**
-   * Check if user was active in the given time window
+   * Check if we're currently in the danger zone (final 2 minutes before timeout)
+   */
+  private _isInDangerZone(): boolean {
+    return this._state.timeRemainingMs <= EXTENSION_RULES.activityWindow;
+  }
+
+  /**
+   * Check if user was active during the current danger zone
+   * Only counts activity that happened while we were in the danger zone
+   */
+  private _wasActiveInDangerZone(): boolean {
+    /*
+     * Calculate when the danger zone started
+     * If we have 1.5 minutes left, danger zone started 30 seconds ago
+     */
+    const dangerZoneStartedAt = Date.now() - (EXTENSION_RULES.activityWindow - this._state.timeRemainingMs);
+
+    // Check if any activity happened after the danger zone started
+    return this._activities.some((a) => a.timestamp >= dangerZoneStartedAt);
+  }
+
+  /**
+   * Check if user was active in the given time window (generic helper)
    */
   private _wasActiveInWindow(windowMs: number): boolean {
     const cutoff = Date.now() - windowMs;
