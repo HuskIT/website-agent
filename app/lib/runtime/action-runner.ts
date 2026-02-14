@@ -410,18 +410,9 @@ export class ActionRunner {
 
   /**
    * Parse a shell command string into command and arguments
-   * Handles shell operators (&&, ||, |, >, <) by wrapping in sh -c
    */
   #parseCommand(command: string): { cmd: string; args: string[] } {
     const trimmed = command.trim();
-
-    // Check for shell operators that require running through a shell
-    const shellOperators = /[;&|<>$`]|(\|\|)|(&&)/;
-
-    if (shellOperators.test(trimmed)) {
-      // Command contains shell operators - run through sh -c
-      return { cmd: 'sh', args: ['-c', trimmed] };
-    }
 
     // Handle quoted arguments
     const parts: string[] = [];
