@@ -688,6 +688,9 @@ export const ChatImpl = memo(
         return;
       }
 
+      // Record prompt activity for sandbox timeout extension (+3 minutes)
+      workbenchStore.recordActivity('prompt');
+
       console.log('🤖 [Chat] sendMessage called with model:', model, 'provider:', provider.name);
 
       let finalMessageContent = messageContent;
