@@ -15,6 +15,14 @@
 
 import type { SandboxProvider } from './types';
 import { createScopedLogger } from '~/utils/logger';
+import {
+  WARNING_THRESHOLD_MS,
+  CHECK_INTERVAL_MS,
+  MIN_AUTO_EXTEND_INTERVAL_MS,
+  PROMPT_EXTENSION_MS,
+  ACTIVITY_EXTENSION_MS,
+  DANGER_ZONE_WINDOW_MS,
+} from './constants';
 
 const logger = createScopedLogger('TimeoutManager');
 
@@ -79,17 +87,17 @@ interface ActivityRecord {
 }
 
 const DEFAULT_CONFIG: Partial<TimeoutManagerConfig> = {
-  warningThresholdMs: 2 * 60 * 1000, // 2 minutes
-  checkIntervalMs: 30 * 1000, // 30 seconds
+  warningThresholdMs: WARNING_THRESHOLD_MS,
+  checkIntervalMs: CHECK_INTERVAL_MS,
   autoExtend: true,
-  minAutoExtendIntervalMs: 60 * 1000, // 1 minute
+  minAutoExtendIntervalMs: MIN_AUTO_EXTEND_INTERVAL_MS,
 };
 
-// Smart extension rules
+// Smart extension rules (using centralized constants)
 const EXTENSION_RULES = {
-  prompt: 3 * 60 * 1000, // +3 minutes on prompt
-  active: 2 * 60 * 1000, // +2 minutes if active during danger zone
-  activityWindow: 2 * 60 * 1000, // Danger zone = final 2 minutes before expiration
+  prompt: PROMPT_EXTENSION_MS,
+  active: ACTIVITY_EXTENSION_MS,
+  activityWindow: DANGER_ZONE_WINDOW_MS,
 };
 
 /**

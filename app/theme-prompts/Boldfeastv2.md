@@ -60,38 +60,46 @@ The output must export a `siteContent` object that merges `siteText` and `siteAs
 #### `siteText`
 
 ##### `seo`
+
 - `title` (string, required) — Page title for search engines. Format: `"BRAND NAME | Tagline"`. Example: `"THE GRILL | Messy. Meaty. Mighty."`
 - `metaDescription` (string, required) — 1–2 sentence SEO description. Example: `"A visceral dining experience for the hungry."`
 
 ##### `navigation` — exactly 5 elements, in this exact order
 
 Each element has:
+
 - `label` (string, required) — Display text. Customizable. Uppercase preferred. 1–3 words.
 - `path` (string, required) — **IMMUTABLE route value. Do not change.**
 - `isCtaButton` (boolean, optional) — Only present on the last element. Must be `true`.
 
 **Element 0:**
+
 - `path`: `"home"` (immutable)
 - `label`: Home page link (e.g., `"HOME"`, `"WELCOME"`)
 
 **Element 1:**
+
 - `path`: `"menu"` (immutable)
 - `label`: Menu page link (e.g., `"MENU"`, `"OUR FOOD"`)
 
 **Element 2:**
+
 - `path`: `"gallery"` (immutable)
 - `label`: Gallery page link (e.g., `"GALLERY"`, `"PHOTOS"`)
 
 **Element 3:**
+
 - `path`: `"locations"` (immutable)
 - `label`: Locations page link (e.g., `"LOCATIONS"`, `"FIND US"`)
 
 **Element 4:**
+
 - `path`: `"reservations"` (immutable)
 - `isCtaButton`: `true` (immutable)
 - `label`: Reservation CTA (e.g., `"Book Table"`, `"RESERVE"`)
 
 ##### `hero`
+
 - `headline` (string, required) — Bold headline, 3–5 words max, uppercase. Example: `"MESSY. MEATY. MIGHTY."`
 - `subhead` (string, required) — 1–2 sentences supporting the headline. Evocative and appetizing.
 - `cta` (object, required):
@@ -100,6 +108,7 @@ Each element has:
 - `imageAlt` (string, required) — Accessibility alt text for the hero image. Concise, descriptive. Derived from the chosen hero image's description but not copied verbatim.
 
 #### `process`
+
 - `title` (string, required) — Section heading, uppercase, 2–4 words. Example: `"FIRE & FURY"`
 - `description` (string, required) — 1–2 sentences explaining the business's preparation philosophy.
 - `steps` (array, required) — **Exactly 3 elements.** Each represents a key stage in the food preparation or brand identity.
@@ -121,21 +130,25 @@ Each element has:
   - `description` (string, required) — One sentence, under 10 words preferred. End with a period. Example: `"Oak & Hickory logs only."`
 
   **Example output (note: no quotes around icon values):**
+
 ```ts
-  steps: [
-    { icon: Flame, title: "WOOD FIRED", description: "Oak & Hickory logs only." },
-    { icon: Utensils, title: "HAND CUT", description: "Butchered daily in-house." },
-    { icon: Drumstick, title: "LOW & SLOW", description: "Smoked for 12+ hours." }
-  ]
+steps: [
+  { icon: Flame, title: 'WOOD FIRED', description: 'Oak & Hickory logs only.' },
+  { icon: Utensils, title: 'HAND CUT', description: 'Butchered daily in-house.' },
+  { icon: Drumstick, title: 'LOW & SLOW', description: 'Smoked for 12+ hours.' },
+];
 ```
 
-  **Required import at the top of the file:**
+**Required import at the top of the file:**
+
 ```ts
-  import { Flame, Utensils, Drumstick } from "lucide-react";
+import { Flame, Utensils, Drumstick } from 'lucide-react';
 ```
-  The import must list every icon used in `steps`. No more, no less.
+
+The import must list every icon used in `steps`. No more, no less.
 
 ##### `menuHighlights`
+
 - `heading` (string, required) — Section heading, uppercase, bold. Example: `"THE PITMASTER'S CHOICE"`
 - `cta` (string, required) — CTA label text. Example: `"VIEW FULL MENU"`
 - `fullMenu` (string, required) — Label string. Example: `"Full Menu"`
@@ -160,14 +173,17 @@ Each element has:
     - `"SEASONAL"` — only available during certain seasons
 
 ##### `galleryTeaser`
+
 - `heading` (string, required) — Section heading, uppercase. Example: `"THE SCENE"`
 - `cta` (string, required) — CTA label. Example: `"VIEW GALLERY"`
 
 ##### `branding`
+
 - `name` (string, required) — Business name. Example: `"The Grill"`
 - `punct` (string, required) — Punctuation mark used in branding. Example: `"."`
 
 ##### `gallery`
+
 - `scene` (string, required) — Short label. Example: `"The Scene"`
 - `title` (string, required) — Page title. Example: `"Gallery"`
 - `atmosphere` (string, required) — Short label. Example: `"The Atmosphere"`
@@ -175,6 +191,7 @@ Each element has:
 - `viewFullGallery` (string, required) — Link label. Example: `"View Full Gallery"`
 
 ##### `footer`
+
 - `address` (string, required) — Primary address, uppercase. Example: `"88 INDUSTRIAL AVE, MEATPACKING DISTRICT"`
 - `hours` (string, required) — Operating hours, uppercase. Example: `"DAILY: 11AM - LATE"`
 - `socials` (string[], required) — **2–4 elements.** Each is an uppercase social media platform name. Allowed values: `"INSTAGRAM"`, `"FACEBOOK"`, `"TIKTOK"`, `"X"`, `"YOUTUBE"`, `"LINKEDIN"`. Only include platforms relevant to the business.
@@ -182,6 +199,7 @@ Each element has:
 - `followUs` (string, required) — Label string. Example: `"Follow Us"`
 
 ##### `locations`
+
 - `title` (string, required) — Page title. Example: `"Locations"`
 - `addresses` (string[], required) — **At least 2 elements.** Each is a location string. Two formats allowed:
   - Open location: `"[Street Address], [Neighborhood/District]"` — Example: `"88 Industrial Ave, Meatpacking District"`
@@ -190,6 +208,7 @@ Each element has:
 - `findUs` (string, required) — Label string. Example: `"Find Us Here"`
 
 ##### `reservations`
+
 - `title` (string, required) — Page title. Example: `"Book a Table"`
 - `subtitle` (string, required) — 1 sentence, on-brand. Example: `"We don't do tiny portions. Bring an appetite."`
 - `form` (object, required):
@@ -223,6 +242,7 @@ Each element has:
 ---
 
 ###$ Export
+
 ```ts
 export const siteContent = { ...siteText, ...siteAsset };
 ```
@@ -263,4 +283,4 @@ Output files using ONLY:
 </boltArtifact>
 
 FORBIDDEN (will be ignored): <function_calls>, <invoke>, <parameter>, bash heredoc
-_ONLY GENERATE A SINGLE `data/content.ts` file, THIS IS COMPUSOLRY AND MUST OBEY OTHERWISE THE WEBSITE WILL GET ERROR.
+\_ONLY GENERATE A SINGLE `data/content.ts` file, THIS IS COMPUSOLRY AND MUST OBEY OTHERWISE THE WEBSITE WILL GET ERROR.

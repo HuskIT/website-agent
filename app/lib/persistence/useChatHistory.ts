@@ -901,10 +901,14 @@ ${value.content}
       let _urlId = urlId;
 
       if (!urlId && firstArtifact?.id) {
-        const urlId = await getUrlId(db, firstArtifact.id);
-        _urlId = urlId;
-        navigateChat(urlId);
-        setUrlId(urlId);
+        const newUrlId = await getUrlId(db, firstArtifact.id);
+        _urlId = newUrlId;
+
+        /*
+         * URL navigation removed - URL should remain stable based on initial project/chat ID
+         * navigateChat(urlId);
+         */
+        setUrlId(newUrlId);
       }
 
       let chatSummary: string | undefined = undefined;
@@ -949,9 +953,12 @@ ${value.content}
 
         chatId.set(nextId);
 
-        if (!urlId) {
-          navigateChat(nextId);
-        }
+        /*
+         * URL navigation removed - URL should remain stable based on initial project/chat ID
+         * if (!urlId) {
+         *   navigateChat(nextId);
+         * }
+         */
       }
 
       // Ensure chatId.get() is used for the final setMessages call
@@ -1145,7 +1152,7 @@ ${value.content}
   };
 }
 
-function navigateChat(nextId: string) {
+function _navigateChat(nextId: string) {
   /**
    * FIXME: Using the intended navigate function causes a rerender for <Chat /> that breaks the app.
    *

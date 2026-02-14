@@ -104,10 +104,12 @@ The output must export a `siteContent` object that merges `siteAssets` and `site
 #### `siteText`
 
 ##### `branding`
+
 - `name` (string, required) — Business name. Example: `"Vitality Bowl"`
 - `tagline` (string, required) — 1 sentence brand tagline. Example: `"Fresh, organic, and locally sourced meals that make you feel alive."`
 
 ##### `seo`
+
 - `title` (string, required) — Page title for search engines. Format: `"[Business Name] - [Short Tagline]"`. Example: `"Vitality Bowl - Fresh, Organic, Alive"`
 - `description` (string, required) — 1–2 sentence SEO description.
 - `keywords` (string, required) — Comma-separated SEO keywords relevant to the business. 5–8 keywords. Example: `"organic restaurant, fresh food, healthy bowls, farm to table, sustainable dining"`
@@ -115,32 +117,39 @@ The output must export a `siteContent` object that merges `siteAssets` and `site
 ##### `navigation` — exactly 5 elements, in this exact order
 
 Each element has:
+
 - `label` (string, required) — Display text. Customizable. Title case preferred. 1–3 words.
 - `path` (string, required) — **IMMUTABLE route value. Do not change.**
 - `isCtaButton` (boolean, optional) — Only present on the last element. Must be `true`.
 
 **Element 0:**
+
 - `path`: `"/"` (immutable)
 - `label`: Home page link (e.g., `"Home"`)
 
 **Element 1:**
+
 - `path`: `"/menu"` (immutable)
 - `label`: Menu page link (e.g., `"Menu"`)
 
 **Element 2:**
+
 - `path`: `"/story"` (immutable)
 - `label`: Story/about page link (e.g., `"Our Story"`)
 
 **Element 3:**
+
 - `path`: `"/gallery"` (immutable)
 - `label`: Gallery page link (e.g., `"Gallery"`)
 
 **Element 4:**
+
 - `path`: `"/contact"` (immutable)
 - `isCtaButton`: `true` (immutable)
 - `label`: Contact/visit CTA (e.g., `"Visit Us"`)
 
 ##### `hero`
+
 - `headline` (string, required) — Bold headline, 3–6 words. Example: `"Real Food. Real Fast."`
 - `subhead` (string, required) — 1 sentence supporting the headline.
 - `ourStory` (string, required) — Label for the story link. Example: `"Our Story"`
@@ -152,6 +161,7 @@ Each element has:
 - `imagePrompt` (string, required) — Descriptive image generation prompt. 1–2 sentences describing ideal photo style, composition, lighting, colors.
 
 ##### `menuHighlights`
+
 - `heading` (string, required) — Section heading. 2–3 words. Example: `"Seasonal Favorites"`
 - `subhead` (string, required) — 1 sentence.
 - `viewDetails` (string, required) — Link label. Example: `"View Details"`
@@ -175,6 +185,7 @@ Each element has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/menu"`.**
 
 ##### `process`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"Sourced with Love"`
 - `subhead` (string, required) — 1 short sentence.
 - `bottomNote` (string, required) — Short tagline displayed at bottom. Example: `"Farm to Table in 24 Hours"`
@@ -196,16 +207,18 @@ Each element has:
   - `description` (string, required) — 1 sentence.
 
   **Example:**
+
 ```ts
-  steps: [
-    { icon: Leaf, title: "Local Farms", description: "We partner with organic farms within 50 miles" },
-    { icon: Truck, title: "Daily Delivery", description: "Fresh ingredients arrive every morning" },
-    { icon: ChefHat, title: "Crafted Fresh", description: "Made to order, never pre-made" },
-    { icon: Heart, title: "Served Fresh", description: "From our kitchen to your table with love" }
-  ]
+steps: [
+  { icon: Leaf, title: 'Local Farms', description: 'We partner with organic farms within 50 miles' },
+  { icon: Truck, title: 'Daily Delivery', description: 'Fresh ingredients arrive every morning' },
+  { icon: ChefHat, title: 'Crafted Fresh', description: 'Made to order, never pre-made' },
+  { icon: Heart, title: 'Served Fresh', description: 'From our kitchen to your table with love' },
+];
 ```
 
 ##### `story`
+
 - `heading` (string, required) — Section heading. Example: `"Our Story"`
 - `subhead` (string, required) — Short tagline. 3–6 words.
 - `content` (string[], required) — **Exactly 3 elements.** Each is a paragraph (2–3 sentences):
@@ -215,6 +228,7 @@ Each element has:
 - `imagePrompt` (string, required) — Descriptive image generation prompt. 1 sentence.
 
 ##### `storyPage`
+
 - `heading` (string, required) — Page heading. Example: `"Our Values"`
 - `subhead` (string, required) — 1 short sentence.
 - `values` (array, required) — **Exactly 4 elements.** Each is a core brand value.
@@ -232,6 +246,7 @@ Each element has:
   - `label` (string, required) — What the stat measures. 1–3 words.
 
 ##### `galleryTeaser`
+
 - `heading` (string, required) — Section heading. 1–3 words.
 - `subhead` (string, required) — 1 short sentence.
 - `images` (array, required) — **Exactly 4 elements.** Each represents a gallery teaser image.
@@ -245,6 +260,7 @@ Each element has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/gallery"`.**
 
 ##### `galleryPage`
+
 - `badge` (string, required) — Badge text. 2–3 words.
 - `title` (string, required) — Page title. Example: `"Gallery"`
 - `intro` (string, required) — 1–2 sentences describing the gallery.
@@ -253,6 +269,7 @@ Each element has:
 - `ctaButton` (string, required) — CTA button text.
 
 ##### `footer`
+
 - `address` (object, required):
   - `street` (string, required) — Street address. Example: `"123 Harvest Lane"`
   - `city` (string, required) — City, state, zip. Example: `"Portland, OR 97214"`
@@ -278,6 +295,7 @@ Each element has:
     - `icon` (**identifier reference**, required) — Must be `Mail` (bare identifier, no quotes). Imported from `lucide-react`.
 
 ##### `contactPage`
+
 - `heroTitle` (string, required) — Page title. Example: `"Visit Us"`
 - `heroIntro` (string, required) — 1 sentence intro.
 - `locationLabel` (string, required) — Label string. Example: `"Location"`
@@ -303,23 +321,26 @@ Each element has:
 #### `siteAssets`
 
 ##### `staticAssets.contact`
+
 - `phone` (string, required) — Phone number. Example: `"(503) 555-BOWL"`
 - `email` (string, required) — Email address. Format: `hello@[brand-domain].com`. Example: `"hello@vitalitybowl.com"`
 
 ##### `staticAssets.socials` — 2 to 4 elements
 
 Each element is an object representing a social media presence:
+
 - `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"Twitter"`, `"TikTok"`, `"YouTube"`.
 - `url` (string, required) — Full URL. Format: `"https://[platform].com/[handle]"`. Use a plausible handle based on the brand name. These are fictional demo URLs.
 - `icon` (**identifier reference**, required) — Bare reference to the matching `lucide-react` icon. **No quotes.** Use: `Instagram` for Instagram, `Facebook` for Facebook, `Twitter` for Twitter. Must be imported at the top of the file.
 
 **Example:**
+
 ```ts
 socials: [
-  { platform: "Instagram", url: "https://instagram.com/vitalitybowl", icon: Instagram },
-  { platform: "Facebook", url: "https://facebook.com/vitalitybowl", icon: Facebook },
-  { platform: "Twitter", url: "https://twitter.com/vitalitybowl", icon: Twitter }
-]
+  { platform: 'Instagram', url: 'https://instagram.com/vitalitybowl', icon: Instagram },
+  { platform: 'Facebook', url: 'https://facebook.com/vitalitybowl', icon: Facebook },
+  { platform: 'Twitter', url: 'https://twitter.com/vitalitybowl', icon: Twitter },
+];
 ```
 
 ##### `staticAssets.images`
@@ -337,8 +358,9 @@ socials: [
 #### Export
 
 **IMPORTANT:** Note the merge order — `siteAssets` is spread first, then `siteText`:
+
 ```ts
-export const siteContent = {...siteAssets, ...siteText};
+export const siteContent = { ...siteAssets, ...siteText };
 ```
 
 ---
@@ -392,6 +414,7 @@ export const siteContent = {...siteAssets, ...siteText};
 ### OUTPUT FILE STRUCTURE
 
 The generated `content.ts` must follow this exact order:
+
 ```ts
 import { Icon1, Icon2, Icon3, ..., MapPin, Clock, Phone, Mail } from 'lucide-react';
 

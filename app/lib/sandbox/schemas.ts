@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { DEFAULT_SANDBOX_TIMEOUT_MS, MIN_SANDBOX_TIMEOUT_MS, MAX_SANDBOX_TIMEOUT_MS } from './constants';
 
 /*
  * =============================================================================
@@ -33,7 +34,7 @@ export const CreateSandboxRequestSchema = z.object({
   snapshotId: z.string().optional(), // Restore from this snapshot
   runtime: z.enum(['node22', 'node24', 'python3.13']).default('node22'),
   ports: z.array(z.number().int().min(1).max(65535)).default([3000, 5173]),
-  timeout: z.number().int().min(60000).max(18000000).default(600000), // 1min - 5hr, default 10min
+  timeout: z.number().int().min(MIN_SANDBOX_TIMEOUT_MS).max(MAX_SANDBOX_TIMEOUT_MS).default(DEFAULT_SANDBOX_TIMEOUT_MS),
 });
 export type CreateSandboxRequest = z.infer<typeof CreateSandboxRequestSchema>;
 

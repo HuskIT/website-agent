@@ -23,6 +23,12 @@ import type { SandboxProvider, SandboxProviderType } from '~/lib/sandbox/types';
 import { createSandboxProvider, resolveProviderType } from '~/lib/sandbox';
 import { FileSyncManager } from '~/lib/sandbox/file-sync';
 import { TimeoutManager, type TimeoutManagerConfig } from '~/lib/sandbox/timeout-manager';
+import {
+  DEFAULT_SANDBOX_TIMEOUT_MS,
+  WARNING_THRESHOLD_MS,
+  MIN_AUTO_EXTEND_INTERVAL_MS,
+  MIN_REQUIRED_TIME_MS,
+} from '~/lib/sandbox/constants';
 
 const { saveAs } = fileSaver;
 const logger = createScopedLogger('WorkbenchStore');
@@ -309,7 +315,7 @@ export class WorkbenchStore {
       userId,
       snapshotId,
       workdir: '/home/project',
-      timeout: 5 * 60 * 1000, // 5 minutes default
+      timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
       ports: [3000, 5173],
       runtime: 'node22',
     });
@@ -563,7 +569,7 @@ export class WorkbenchStore {
                   userId,
                   snapshotId: latestSnapshot.vercel_snapshot_id,
                   workdir: '/home/project',
-                  timeout: 5 * 60 * 1000,
+                  timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
                   ports: [3000, 5173],
                   runtime: 'node22',
                 },
@@ -662,7 +668,7 @@ export class WorkbenchStore {
             projectId,
             userId: effectiveUserId,
             workdir: '/home/project',
-            timeout: 5 * 60 * 1000,
+            timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
             ports: [3000, 5173],
             runtime: 'node22',
           },
@@ -908,10 +914,10 @@ export class WorkbenchStore {
     }
 
     const config: TimeoutManagerConfig = {
-      warningThresholdMs: 2 * 60 * 1000, // 2 minutes
+      warningThresholdMs: WARNING_THRESHOLD_MS,
       checkIntervalMs: 30 * 1000, // 30 seconds
       autoExtend: true,
-      minAutoExtendIntervalMs: 60 * 1000, // 1 minute
+      minAutoExtendIntervalMs: MIN_AUTO_EXTEND_INTERVAL_MS,
       onWarning: (timeRemainingMs) => {
         logger.info('Timeout warning triggered - saving pre-emptive snapshot', { timeRemainingMs });
 
@@ -990,7 +996,7 @@ export class WorkbenchStore {
   /**
    * Request manual timeout extension
    */
-  async requestTimeoutExtension(durationMs: number = 5 * 60 * 1000): Promise<boolean> {
+  async requestTimeoutExtension(durationMs: number = DEFAULT_SANDBOX_TIMEOUT_MS): Promise<boolean> {
     if (!this.#timeoutManager) {
       return false;
     }
@@ -1579,7 +1585,7 @@ export class WorkbenchStore {
       // Check if sandbox has enough time remaining for the upload + install + dev start (~3 min)
       if (this.#sandboxProvider?.timeoutRemaining !== null && this.#sandboxProvider?.timeoutRemaining !== undefined) {
         const timeRemaining = this.#sandboxProvider.timeoutRemaining;
-        const MIN_REQUIRED_MS = 3 * 60 * 1000; // 3 minutes
+        const MIN_REQUIRED_MS = MIN_REQUIRED_TIME_MS;
 
         if (timeRemaining < MIN_REQUIRED_MS) {
           logger.warn('Sandbox has insufficient time remaining, extending timeout', {
@@ -1588,7 +1594,7 @@ export class WorkbenchStore {
           });
 
           try {
-            await this.#sandboxProvider.extendTimeout?.(5 * 60 * 1000);
+            await this.#sandboxProvider.extendTimeout?.(DEFAULT_SANDBOX_TIMEOUT_MS);
             logger.info('Sandbox timeout extended');
           } catch (extendError) {
             logger.warn('Failed to extend sandbox timeout, proceeding anyway', { error: extendError });

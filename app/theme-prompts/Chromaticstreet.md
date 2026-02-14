@@ -101,7 +101,8 @@ Generate a creative **Design System**, **Component Concepts**, and **Content Str
 
 ---
 
-## 6. DATA STRUCTURE (`data/content.ts`)**
+## 6. DATA STRUCTURE (`data/content.ts`)\*\*
+
 ### STRUCTURE REFERENCE
 
 The output must export a `siteContent` object that merges `siteAssets` and `siteText` (in that order). Below is the complete schema with inline constraints for every field and array element.
@@ -109,13 +110,16 @@ The output must export a `siteContent` object that merges `siteAssets` and `site
 #### `siteText`
 
 ##### `seo`
+
 - `title` (string, required) — Page title for search engines. Format: `"[Business Name] | [Short Description]"`. Example: `"Culinary Haven | SouthEast Asian Flavors"`
 - `metaDescription` (string, required) — 1–2 sentence SEO description.
 
 ##### `branding`
+
 - `name` (string, required) — Business name. Example: `"The Chromatic Street"`
 
 ##### `common`
+
 - `hours` (string, required) — Label string for hours. Example: `"Hours"`
 - `join` (string, required) — Label string for newsletter/join action. Example: `"Join"`
 - `location` (string, required) — Label string for location. Example: `"Location"`
@@ -123,26 +127,32 @@ The output must export a `siteContent` object that merges `siteAssets` and `site
 ##### `navigation` — exactly 4 elements, in this exact order
 
 Each element has:
+
 - `label` (string, required) — Display text. Customizable. Title case preferred. 1–3 words.
 - `path` (string, required) — **IMMUTABLE route value. Do not change.**
 
 **Element 0:**
+
 - `path`: `"/"` (immutable)
 - `label`: Home page link (e.g., `"Home"`, `"Welcome"`)
 
 **Element 1:**
+
 - `path`: `"/menu"` (immutable)
 - `label`: Menu page link (e.g., `"Menu"`, `"Our Food"`)
 
 **Element 2:**
+
 - `path`: `"/about"` (immutable)
 - `label`: About/story page link (e.g., `"Our Story"`, `"About Us"`)
 
 **Element 3:**
+
 - `path`: `"/#contact"` (immutable)
 - `label`: Contact/footer anchor link (e.g., `"Contact"`, `"Find Us"`)
 
 ##### `hero`
+
 - `headline` (string, required) — Bold headline, 5–10 words. Example: `"Experience the Finest SouthEast Asian Flavors"`
 - `cta` (object, required):
   - `label` (string, required) — CTA button text. Example: `"View Menu"`
@@ -150,11 +160,13 @@ Each element has:
 - `imageAlt` (string, required) — Accessibility alt text for the hero image. Concise, descriptive. Derived from the chosen hero image's description but not copied verbatim.
 
 ##### `featureBlock`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"Discover the Essence"`
 - `body` (string, required) — 2–3 sentences describing the restaurant's essence, sourcing, or culinary philosophy. Evocative and immersive.
 - `imageAlt` (string, required) — Alt text for the feature block image. Example: `"Chef pouring broth into bowl"`
 
 ##### `storyBlock`
+
 - `heading` (string, required) — Section heading. 3–6 words. Example: `"Embark on a Culinary Adventure"`
 - `body` (string, required) — 2–3 sentences about the culinary journey or heritage.
 - `imagesAlts` (string[], required) — **Exactly 3 elements.** Each is a concise alt text string for the corresponding story block image. Derived from each image's description but not copied verbatim.
@@ -166,6 +178,7 @@ Each element has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/about"`.**
 
 ##### `storyPage`
+
 - `heading` (string, required) — Page title. Example: `"Our Story"`
 - `subhead` (string, required) — 1 sentence tagline. Evocative. Example: `"Born from the heat of the street and the soul of the kitchen."`
 - `heroImageAlt` (string, required) — Alt text for the story page hero image. Concise, descriptive. Derived from the chosen `storyPageHero` image's description but not copied verbatim. Example: `"Our Chef"`
@@ -182,6 +195,7 @@ Each element has:
   - `desc` (string, required) — 1 sentence describing the value. Example: `"Ingredients sourced daily from local markets."`
 
 ##### `fullMenu`
+
 - `heading` (string, required) — Page title. Example: `"The Menu"`
 - `subhead` (string, required) — 1 sentence describing the menu's character.
 - `starters` (object, required):
@@ -215,6 +229,7 @@ Each element has:
     - `desc` (string, required) — 1 short sentence describing the drink.
 
 ##### `menuPreview`
+
 - `heading` (string, required) — Section heading. 5–10 words. Example: `"Savor a fusion of exquisite flavors"`
 - `items` (array, required) — **Exactly 3 elements.** Each is a featured dish preview for the homepage.
 
@@ -227,6 +242,7 @@ Each element has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/menu"`.**
 
 ##### `footer`
+
 - `newsletterHeading` (string, required) — Heading for newsletter signup section. Example: `"Stay Up to Date"`
 - `hours` (string, required) — Operating hours. Example: `"Mon-Sun: 11am - 10pm"`
 - `address` (string, required) — Full address. Example: `"500 Terry Francine St, San Francisco, CA"`
@@ -237,6 +253,7 @@ Each element has:
 #### `siteAssets`
 
 ##### `staticAssets.colors`
+
 - `primary` (string, required) — Primary brand color as hex. Example: `"#FF5722"`
 - `secondary` (string, required) — Secondary brand color as hex. Example: `"#2962FF"`
 - `highlight` (string, required) — Highlight/accent color as hex. Example: `"#FFEB3B"`
@@ -266,16 +283,18 @@ Each element has:
 ##### `staticAssets.socials` — 2 to 4 elements
 
 Each element is an object representing a social media presence:
+
 - `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"Twitter"`, `"TikTok"`, `"YouTube"`. Only include platforms relevant to the business.
 - `url` (string, required) — URL string. Use `"#"` as placeholder value for all social links.
 
 **Example:**
+
 ```ts
 socials: [
-  { platform: "Instagram", url: "#" },
-  { platform: "Facebook", url: "#" },
-  { platform: "Twitter", url: "#" }
-]
+  { platform: 'Instagram', url: '#' },
+  { platform: 'Facebook', url: '#' },
+  { platform: 'Twitter', url: '#' },
+];
 ```
 
 ---
@@ -283,8 +302,9 @@ socials: [
 #### Export
 
 **IMPORTANT:** Note the merge order — `siteAssets` is spread first, then `siteText`:
+
 ```ts
-export const siteContent = { ...siteAssets, ...siteText }
+export const siteContent = { ...siteAssets, ...siteText };
 ```
 
 ---
@@ -337,6 +357,7 @@ export const siteContent = { ...siteAssets, ...siteText }
 ### OUTPUT FILE STRUCTURE
 
 The generated `content.ts` must follow this exact order:
+
 ```ts
 const siteText = {
   // ... all siteText content
@@ -346,7 +367,7 @@ const siteAssets = {
   // ... all siteAssets content
 };
 
-export const siteContent = { ...siteAssets, ...siteText }
+export const siteContent = { ...siteAssets, ...siteText };
 ```
 
 Note: This template does NOT use any `lucide-react` icons. Do not add any import statements.

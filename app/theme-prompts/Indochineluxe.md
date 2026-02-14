@@ -106,14 +106,17 @@ The output file has **three individually exported objects** (`siteText`, `siteAs
 #### `siteText` (exported as `export const siteText`)
 
 ##### `seo`
+
 - `title` (string, required) — Page title. Format: `"[Business Name] | [Short Description]"`. Example: `"Indochine Luxe | Contemporary Vietnamese Cuisine"`
 - `description` (string, required) — 1–2 sentence SEO description.
 
 ##### `branding`
+
 - `name` (string, required) — Business name. Example: `"Indochine Luxe"`
 - `slogan` (string, required) — 1 sentence brand slogan. Example: `"A culinary journey through the soul of Saigon, where heritage meets artistry."`
 
 ##### `common`
+
 - `connect` (string, required) — Label string. Example: `"Connect"`
 - `contact` (string, required) — Label string. Example: `"Contact"`
 - `dressCode` (string, required) — Label string. Example: `"Dress Code"`
@@ -130,32 +133,39 @@ The output file has **three individually exported objects** (`siteText`, `siteAs
 **Note the plural key name: `navigations`, not `navigation`.**
 
 Each element has:
+
 - `label` (string, required) — Display text. Customizable. Title case. 1–3 words.
 - `path` (string, required) — **IMMUTABLE route value. Do not change.**
 - `isCtaButton` (boolean, optional) — Only present on the last element. Must be `true`.
 
 **Element 0:**
+
 - `path`: `"/"` (immutable)
 - `label`: Home page link (e.g., `"Home"`)
 
 **Element 1:**
+
 - `path`: `"/menu"` (immutable)
 - `label`: Menu page link (e.g., `"Menu"`)
 
 **Element 2:**
+
 - `path`: `"/story"` (immutable)
 - `label`: Heritage/story page link (e.g., `"Heritage"`, `"Our Story"`)
 
 **Element 3:**
+
 - `path`: `"/gallery"` (immutable)
 - `label`: Gallery page link (e.g., `"Gallery"`)
 
 **Element 4:**
+
 - `path`: `"/reservations"` (immutable)
 - `isCtaButton`: `true` (immutable)
 - `label`: Reservation CTA (e.g., `"Reservations"`, `"Book a Table"`)
 
 ##### `hero`
+
 - `eyebrow` (string, required) — Small text above headline. 2–5 words. Example: `"Contemporary Vietnamese Cuisine"`
 - `headline` (string, required) — Bold headline, 3–6 words. Example: `"The Soul of Saigon"`
 - `subhead` (string, required) — 1 sentence supporting the headline.
@@ -168,6 +178,7 @@ Each element has:
 - `imagePrompt` (string, required) — Descriptive image generation prompt. 1–2 sentences describing ideal composition, lighting, mood.
 
 ##### `menuHighlights`
+
 - `heading` (string, required) — Section heading. 2–3 words. Example: `"Chef's Signatures"`
 - `subhead` (string, required) — 1–2 sentences.
 - `items` (array, required) — **Exactly 4 elements.** Each is a featured dish.
@@ -186,6 +197,7 @@ Each element has:
 ##### `fullMenu` — array of 3 to 5 category objects
 
 Each category has:
+
 - `category` (string, required) — Category name, title case. Example: `"Starters"`, `"Mains"`, `"Soups & Noodles"`, `"Desserts"`
 - `items` (array, required) — **3–5 elements.** Each is a dish.
 
@@ -195,6 +207,7 @@ Each category has:
   - `description` (string, required) — 1 sentence listing ingredients and preparation.
 
 ##### `ingredients`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"Sourced with Intention"`
 - `subhead` (string, required) — 1 sentence.
 - `items` (array, required) — **Exactly 3 elements.** Each is a signature ingredient.
@@ -207,6 +220,7 @@ Each category has:
   - `imageSrc` (string, required) — **Image URL from `INPUT IMAGES`.** Match by description relevance.
 
 ##### `heritage`
+
 - `heading` (string, required) — Section heading. 2–4 words. Example: `"From Our Roots"`
 - `body` (string[], required) — **Exactly 3 elements.** Each is a paragraph (2–3 sentences) forming a narrative:
   - `body[0]`: Origin — founding story, the beginning.
@@ -220,6 +234,7 @@ Each category has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/story"`.**
 
 ##### `gallery`
+
 - `heading` (string, required) — Section heading. 2–3 words. Example: `"The Space"`
 - `subhead` (string, required) — 1 sentence describing the atmosphere.
 - `images` (array, required) — **7–10 elements.** Each is a gallery image with prompt, alt, and source.
@@ -238,6 +253,7 @@ Each category has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/gallery"`.**
 
 ##### `reservations`
+
 - `heading` (string, required) — Page title. Example: `"Reservations"`
 - `subhead` (string, required) — 1 sentence.
 - `note` (string, required) — 1 sentence note about private dining or large groups.
@@ -266,6 +282,7 @@ Each category has:
   - `link` (string, required) — **IMMUTABLE. Must always be `"/reservations"`.**
 
 ##### `footer`
+
 - `address` (object, required):
   - `line1` (string, required) — Street address. Example: `"123 Đồng Khởi Street"`
   - `line2` (string, required) — District/area. Example: `"District 1, Ho Chi Minh City"`
@@ -275,6 +292,7 @@ Each category has:
   Each hours entry has:
   - `days` (string, required) — Day range. Example: `"Tuesday - Thursday"`, `"Sunday - Monday"`
   - `time` (string, required) — Time range or `"Closed"`. Example: `"6:00 PM - 10:30 PM"`, `"Closed"`
+
 - `copyright` (string, required) — Copyright text. Format: `"[Business Name]. All rights reserved."`. Example: `"Indochine Luxe. All rights reserved."`
 
 ---
@@ -284,21 +302,24 @@ Each category has:
 **Note:** `siteAssets` in this template is a flat object — no `staticAssets` wrapper.
 
 ##### `contact`
+
 - `phone` (string, required) — Phone number with country code if applicable. Example: `"+84 28 3829 5555"`
 - `email` (string, required) — Email address. Example: `"reservations@indochineluxe.vn"`
 
 ##### `socials` — 2 to 4 elements
 
 Each element has:
+
 - `platform` (string, required) — Platform name, title case. Allowed values: `"Instagram"`, `"Facebook"`, `"Twitter"`, `"TikTok"`, `"YouTube"`.
 - `url` (string, required) — Full URL. Format: `"https://[platform].com/[handle]"`. Use a plausible handle based on the brand name. These are fictional demo URLs.
 
 **Example:**
+
 ```ts
 socials: [
-  { platform: "Instagram", url: "https://instagram.com/indochineluxe" },
-  { platform: "Facebook", url: "https://facebook.com/indochineluxe" },
-]
+  { platform: 'Instagram', url: 'https://instagram.com/indochineluxe' },
+  { platform: 'Facebook', url: 'https://facebook.com/indochineluxe' },
+];
 ```
 
 ---
@@ -308,28 +329,33 @@ socials: [
 This object contains **template literal functions** used by the application. The function signatures and parameter names are fixed; only the message text should be customized to match the brand voice.
 
 - `thankyouMsg` — A function that takes `(name: string, date: string, time: string)` and returns a thank-you message using template literals. Example:
+
 ```ts
-  thankyouMsg: (name: string, date: string, time: string) => {
-    return `Thank you, ${name}. We look forward to welcoming you on ${date} at ${time}.`;
-  }
+thankyouMsg: (name: string, date: string, time: string) => {
+  return `Thank you, ${name}. We look forward to welcoming you on ${date} at ${time}.`;
+};
 ```
-  - **The function signature must remain exactly `(name: string, date: string, time: string)`.**
-  - **Must use template literals with `${name}`, `${date}`, `${time}` interpolation.**
-  - Only customize the surrounding message text.
+
+- **The function signature must remain exactly `(name: string, date: string, time: string)`.**
+- **Must use template literals with `${name}`, `${date}`, `${time}` interpolation.**
+- Only customize the surrounding message text.
 
 - `confirmationEmailMsg` — A function that takes `(email: string)` and returns a confirmation email message. Example:
+
 ```ts
-  confirmationEmailMsg: (email: string) => {
-    return `A confirmation email has been sent to ${email}.`;
-  }
+confirmationEmailMsg: (email: string) => {
+  return `A confirmation email has been sent to ${email}.`;
+};
 ```
-  - **The function signature must remain exactly `(email: string)`.**
-  - **Must use template literal with `${email}` interpolation.**
-  - Only customize the surrounding message text.
+
+- **The function signature must remain exactly `(email: string)`.**
+- **Must use template literal with `${email}` interpolation.**
+- Only customize the surrounding message text.
 
 ---
 
 #### Final Export
+
 ```ts
 export const siteContent = { ...siteText, ...siteAssets, ...siteComplexContent };
 ```
@@ -386,6 +412,7 @@ export const siteContent = { ...siteText, ...siteAssets, ...siteComplexContent }
 ## OUTPUT FILE STRUCTURE
 
 The generated `content.ts` must follow this exact order:
+
 ```ts
 export const siteText = {
   // ... all siteText content
@@ -401,7 +428,7 @@ export const siteComplexContent = {
   },
   confirmationEmailMsg: (email: string) => {
     return `...${email}...`;
-  }
+  },
 };
 
 export const siteContent = { ...siteText, ...siteAssets, ...siteComplexContent };
