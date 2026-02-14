@@ -10,6 +10,7 @@ import { Sandbox, Snapshot } from '@vercel/sandbox';
 import { getSession } from '~/lib/auth/session.server';
 import { getProjectById, updateProject } from '~/lib/services/projects.server';
 import { RestoreSnapshotRequestSchema, type RestoreSnapshotResponse } from '~/lib/sandbox/schemas';
+import { DEFAULT_SANDBOX_TIMEOUT_MS } from '~/lib/sandbox/constants';
 import { createScopedLogger } from '~/utils/logger';
 
 const logger = createScopedLogger('api.sandbox.snapshot.restore');
@@ -100,7 +101,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         ...VERCEL_CREDS,
         source: { type: 'snapshot', snapshotId },
         runtime: 'node22',
-        timeout: 5 * 60 * 1000, // 5 min default
+        timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
         ports: [3000, 5173],
       });
 
