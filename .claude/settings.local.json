@@ -103,7 +103,9 @@
       "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" grep:*)",
       "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" log:*)",
       "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" show:*)",
-      "Bash(mgrep:*)"
+      "Bash(mgrep:*)",
+      "Bash(corepack:*)",
+      "Bash(sh:*)"
     ],
     "deny": [],
     "ask": []
