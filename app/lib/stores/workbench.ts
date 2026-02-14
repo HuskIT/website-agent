@@ -981,7 +981,7 @@ export class WorkbenchStore {
   /**
    * Record user activity for timeout auto-extension
    */
-  recordActivity(type: 'file_write' | 'command' | 'preview_access' | 'user_interaction'): void {
+  recordActivity(type: 'file_write' | 'command' | 'preview_access' | 'user_interaction' | 'prompt'): void {
     if (this.#timeoutManager) {
       this.#timeoutManager.recordActivity(type);
     }
