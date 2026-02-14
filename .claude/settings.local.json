@@ -97,7 +97,12 @@
       "Bash(if [ -f .env.local ])",
       "Bash(set:*)",
       "Bash(pnpm run test:error-capture:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(\" of package \")",
+      "Bash(\"\n\nWhen LLM generates commands like:\n  npm install && npm run dev\n\nThe command is now correctly executed as:\n  sh -c \"npm install)",
+      "Bash(npm run dev:*)"
     ],
     "deny": [],
     "ask": []
