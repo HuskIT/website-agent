@@ -25,6 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const response = await auth.api.signUpEmail({
+      headers: request.headers,
       body: {
         email,
         password,
@@ -34,6 +35,17 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!response.ok) {
+      const upstreamBody = await response
+        .text()
+        .then((body) => body.slice(0, 1000))
+        .catch(() => '<unavailable>');
+
+      console.error('[Auth][Signup] signUpEmail failed', {
+        status: response.status,
+        statusText: response.statusText,
+        upstreamBody,
+      });
+
       return json({ error: 'Failed to create account' }, { status: 400 });
     }
 
@@ -41,8 +53,12 @@ export async function action({ request }: ActionFunctionArgs) {
     return redirect('/app?login=true', {
       headers: response.headers,
     });
-  } catch (error: any) {
-    return json({ error: error.message || 'Something went wrong' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('[Auth][Signup] unexpected action error', {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return json({ error: 'Something went wrong' }, { status: 500 });
   }
 }
 
