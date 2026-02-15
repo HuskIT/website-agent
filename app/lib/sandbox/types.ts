@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { DEFAULT_SANDBOX_TIMEOUT_MS } from './constants';
 
 /*
  * =============================================================================
@@ -116,7 +117,7 @@ export const SandboxConfigSchema = z.object({
   userId: z.string().uuid(),
   snapshotId: z.string().optional(),
   workdir: z.string().default('/home/project'),
-  timeout: z.number().default(5 * 60 * 1000), // 5 minutes default
+  timeout: z.number().default(DEFAULT_SANDBOX_TIMEOUT_MS),
   ports: z.array(z.number()).default([3000, 5173]),
   runtime: z.enum(['node22', 'node24', 'python3.13']).default('node22'),
 });

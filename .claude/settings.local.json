@@ -97,15 +97,7 @@
       "Bash(if [ -f .env.local ])",
       "Bash(set:*)",
       "Bash(pnpm run test:error-capture:*)",
-      "Bash(env)",
-      "Bash(docker tag:*)",
-      "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" diff:*)",
-      "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" grep:*)",
-      "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" log:*)",
-      "Bash(git -C \"/Users/khoitran/Documents/Projects/huskit/website-agent\" show:*)",
-      "Bash(mgrep:*)",
-      "Bash(corepack:*)",
-      "Bash(sh:*)"
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
