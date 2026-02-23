@@ -19,6 +19,7 @@ dotenv.config();
 export default defineConfig((config) => {
   const isSsrBuild = config.isSsrBuild === true;
   const isBuildCommand = config.command === 'build';
+  const shouldPreferBrowserConditions = !isSsrBuild && config.mode !== 'test';
 
   return {
     define: {
@@ -29,9 +30,9 @@ export default defineConfig((config) => {
         '@smithy/core/dist-es/getSmithyContext': '/test/stubs/smithy-get.ts',
         '@smithy/core/dist-es': '/test/stubs/smithy-index.ts',
       },
-      // Keep shared resolve behavior here; SSR-specific behavior is controlled
-      // under `ssr.resolve` to avoid changing global build/runtime resolution.
-      conditions: ['import', 'module', 'browser', 'default'],
+      // Prefer browser condition only for non-test client builds.
+      // Node tests/SSR should resolve server-safe entries.
+      conditions: shouldPreferBrowserConditions ? ['import', 'browser', 'default'] : ['import', 'default'],
     },
     server: {
       port: 5171,
@@ -282,7 +283,7 @@ export default defineConfig((config) => {
       resolve: {
         // Keep SSR conditions runtime-oriented (workerd/worker first),
         // without forcing browser-first package resolution in server code.
-        conditions: ['workerd', 'worker', 'import', 'module', 'default'],
+        conditions: ['workerd', 'worker', 'import', 'default'],
         // Externalized SSR deps in dev use this set; include `node` fallback
         // for packages that don't publish worker-specific condition entries.
         externalConditions: ['workerd', 'worker', 'node'],

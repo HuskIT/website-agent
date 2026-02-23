@@ -3,8 +3,14 @@ import { z } from 'zod';
 import type { GeneratedFile } from '~/types/generation';
 import type { IProviderSetting, ProviderInfo } from '~/types/model';
 import type { BusinessProfile } from '~/types/project';
-import type { RestaurantThemeId } from '~/types/restaurant-theme';
 import type { TemplateSelection } from '~/lib/services/projectGenerationService';
+import { createEditorAgent, type EditorAgent, type EditorGenerateContentFn } from '~/lib/mastra/agents/editor';
+import {
+  createPlannerAgent,
+  type PlannerAgent,
+  type PlannerAgentPlan,
+  type PlannerSelectTemplateFn,
+} from '~/lib/mastra/agents/planner';
 import type {
   FileMutationContext,
   FileMutationOperation,
@@ -44,6 +50,15 @@ const templateSelectionSchema = z.object({
   name: z.string(),
   title: z.string().optional(),
   reasoning: z.string().optional(),
+});
+
+const plannerPlanSchema = z.object({
+  projectId: z.string(),
+  template: templateSelectionSchema,
+  targetFiles: z.array(z.string()),
+  mutationMode: z.literal('write_file'),
+  riskLevel: z.enum(['low', 'medium', 'high']),
+  notes: z.array(z.string()),
 });
 
 const generatedFileSchema = z.object({
@@ -122,6 +137,7 @@ const workflowStateSchema = z.object({
   businessProfile: z.unknown().optional(),
   generation: generationInputSchema.optional(),
   runtime: runtimeInputSchema.optional(),
+  plan: plannerPlanSchema.nullable(),
   template: templateSelectionSchema.nullable(),
   generatedFiles: z.array(generatedFileSchema),
   mutation: fileMutationResultSchema,
@@ -134,6 +150,7 @@ const workflowOutputSchema = z.object({
   projectId: z.string(),
   mutation: fileMutationResultSchema,
   success: z.boolean(),
+  plan: plannerPlanSchema.nullable(),
   template: templateSelectionSchema.nullable(),
   generatedFiles: z.array(generatedFileSchema),
   preview: runtimePreviewResultSchema.nullable(),
@@ -158,13 +175,6 @@ function isCommandFailure(result: { exitCode: number; success?: boolean }): bool
   return result.exitCode !== 0 || result.success === false;
 }
 
-function toGeneratedFileOperations(files: GeneratedFile[]): FileMutationOperation[] {
-  return files.map((file) => ({
-    path: file.path,
-    content: file.content,
-  }));
-}
-
 function toBuildFailureWarning(attempt: number, stderr: string): string {
   const message = stderr.trim();
   const preview = message ? message.slice(0, 240) : 'unknown build failure';
@@ -178,7 +188,8 @@ async function runShellCommand(
   command: string,
   cwd: string,
 ) {
-  return runtimeAdapter.runCommand(session, 'sh', ['-lc', command], { cwd });
+  // Use bash login shell so environment setup scripts (nvm/corepack/pnpm) load correctly on E2B.
+  return runtimeAdapter.runCommand(session, 'bash', ['-lc', command], { cwd });
 }
 
 export interface BootstrapGenerationInput {
@@ -215,9 +226,11 @@ export interface BootstrapWebsiteOutput {
   projectId: string;
   mutation: FileMutationResult;
   success: boolean;
+  plan?: PlannerAgentPlan;
   template?: TemplateSelection;
   generatedFiles?: GeneratedFile[];
   preview?: RuntimePreviewResult;
+  runtimeSessionId?: string;
   buildAttempts?: number;
   warnings?: string[];
 }
@@ -229,22 +242,12 @@ export interface BootstrapWebsiteWorkflow {
 }
 
 interface BootstrapWorkflowDeps {
-  selectTemplate?: (
-    businessProfile: BusinessProfile,
-    fastModel: string,
-    provider: ProviderInfo,
-    baseUrl: string,
-    cookieHeader: string | null,
-  ) => Promise<TemplateSelection>;
-  generateContent?: (
-    businessProfile: BusinessProfile,
-    themeId: RestaurantThemeId,
-    model: string,
-    provider: ProviderInfo,
-    env: Env | undefined,
-    apiKeys: Record<string, string>,
-    providerSettings: Record<string, IProviderSetting>,
-  ) => AsyncGenerator<{ event: 'file'; data: GeneratedFile }>;
+  plannerAgent?: PlannerAgent;
+  editorAgent?: EditorAgent;
+
+  // Backward-compatible dependency injection for tests and adapters.
+  selectTemplate?: PlannerSelectTemplateFn;
+  generateContent?: EditorGenerateContentFn;
 }
 
 export function createBootstrapWebsiteWorkflow(
@@ -255,30 +258,46 @@ export function createBootstrapWebsiteWorkflow(
     id: 'bootstrapWebsite',
     mutationMode: strategy.mode,
     async run(input: BootstrapWebsiteInput, context: FileMutationContext): Promise<BootstrapWebsiteOutput> {
-      let selectTemplate = deps.selectTemplate;
-      let generateContent = deps.generateContent;
-      const getSelectTemplate = async (): Promise<NonNullable<BootstrapWorkflowDeps['selectTemplate']>> => {
-        if (!selectTemplate) {
-          selectTemplate = (await import('~/lib/services/projectGenerationService')).selectTemplate;
+      let selectTemplateFn = deps.selectTemplate;
+      let generateContentFn = deps.generateContent;
+      const getSelectTemplate = async (): Promise<PlannerSelectTemplateFn> => {
+        if (!selectTemplateFn) {
+          selectTemplateFn = (await import('~/lib/services/projectGenerationService')).selectTemplate;
         }
 
-        if (!selectTemplate) {
+        if (!selectTemplateFn) {
           throw new Error('selectTemplate dependency is not available');
         }
 
-        return selectTemplate;
+        return selectTemplateFn;
       };
-      const getGenerateContent = async (): Promise<NonNullable<BootstrapWorkflowDeps['generateContent']>> => {
-        if (!generateContent) {
-          generateContent = (await import('~/lib/services/projectGenerationService')).generateContent;
+      const getGenerateContent = async (): Promise<EditorGenerateContentFn> => {
+        if (!generateContentFn) {
+          generateContentFn = (await import('~/lib/services/projectGenerationService')).generateContent;
         }
 
-        if (!generateContent) {
+        if (!generateContentFn) {
           throw new Error('generateContent dependency is not available');
         }
 
-        return generateContent;
+        return generateContentFn;
       };
+      const plannerAgent =
+        deps.plannerAgent ??
+        createPlannerAgent({
+          selectTemplate: async (...args) => (await getSelectTemplate())(...args),
+        });
+      const editorAgent =
+        deps.editorAgent ??
+        createEditorAgent({
+          async *generateContent(...args) {
+            const generator = (await getGenerateContent())(...args);
+
+            for await (const chunk of generator) {
+              yield chunk;
+            }
+          },
+        });
 
       const runtimeAdapter = input.runtime?.adapter ?? new E2BRuntimeAdapter();
       let runtimeSession: V2RuntimeSession | null = null;
@@ -324,6 +343,7 @@ export function createBootstrapWebsiteWorkflow(
             businessProfile: inputData.businessProfile,
             generation: inputData.generation,
             runtime: inputData.runtime,
+            plan: null,
             template: null,
             generatedFiles: [],
             mutation: createEmptyMutation(strategy.mode),
@@ -345,18 +365,19 @@ export function createBootstrapWebsiteWorkflow(
 
           const generation = inputData.generation as BootstrapGenerationInput;
           const businessProfile = inputData.businessProfile as BusinessProfile;
-          const selectTemplateFn = await getSelectTemplate();
-          const selectedTemplateFromService = await selectTemplateFn(
+          const plan = await plannerAgent.run({
+            projectId: inputData.projectId,
             businessProfile,
-            generation.fastModel ?? generation.model,
-            (generation.fastProvider ?? generation.provider) as ProviderInfo,
-            generation.baseUrl,
-            generation.cookieHeader ?? null,
-          );
+            fastModel: generation.fastModel ?? generation.model,
+            fastProvider: (generation.fastProvider ?? generation.provider) as ProviderInfo,
+            baseUrl: generation.baseUrl,
+            cookieHeader: generation.cookieHeader ?? null,
+          });
 
           return {
             ...inputData,
-            template: selectedTemplateFromService,
+            plan,
+            template: plan.template,
           };
         },
       });
@@ -372,30 +393,28 @@ export function createBootstrapWebsiteWorkflow(
 
           const generation = inputData.generation as BootstrapGenerationInput;
           const businessProfile = inputData.businessProfile as BusinessProfile;
-          const generateContentFn = await getGenerateContent();
+          const template = (inputData.plan?.template ?? inputData.template) as TemplateSelection | null;
 
-          if (!inputData.template?.themeId) {
+          if (!template?.themeId) {
             throw new Error('Template selection must be completed before content generation');
           }
 
-          const generatedFiles: GeneratedFile[] = [];
-
-          for await (const fileEvent of generateContentFn(
+          const editorResult = await editorAgent.run({
+            projectId: inputData.projectId,
             businessProfile,
-            inputData.template.themeId as any,
-            generation.model,
-            generation.provider as ProviderInfo,
-            generation.env,
-            generation.apiKeys,
-            generation.providerSettings,
-          )) {
-            generatedFiles.push(fileEvent.data);
-          }
+            template,
+            model: generation.model,
+            provider: generation.provider as ProviderInfo,
+            env: generation.env,
+            apiKeys: generation.apiKeys,
+            providerSettings: generation.providerSettings as Record<string, IProviderSetting>,
+          });
 
           return {
             ...inputData,
-            generatedFiles,
-            operations: toGeneratedFileOperations(generatedFiles),
+            generatedFiles: editorResult.generatedFiles,
+            operations: editorResult.operations,
+            warnings: [...inputData.warnings, ...editorResult.warnings],
           };
         },
       });
@@ -510,7 +529,8 @@ export function createBootstrapWebsiteWorkflow(
             projectId: inputData.projectId,
             mutation: inputData.mutation as FileMutationResult,
             success: inputData.mutation.failures.length === 0,
-            template: inputData.template,
+            plan: inputData.plan,
+            template: inputData.plan?.template ?? inputData.template,
             generatedFiles: inputData.generatedFiles as GeneratedFile[],
             preview: inputData.preview,
             buildAttempts: inputData.buildAttempts,
@@ -565,9 +585,11 @@ export function createBootstrapWebsiteWorkflow(
         projectId: result.result.projectId,
         mutation: result.result.mutation,
         success: result.result.success,
+        plan: (result.result.plan as PlannerAgentPlan | null) ?? undefined,
         template: (result.result.template as TemplateSelection | null) ?? undefined,
         generatedFiles: result.result.generatedFiles,
         preview: result.result.preview ?? undefined,
+        runtimeSessionId: (runtimeSession as V2RuntimeSession | null)?.sessionId,
         buildAttempts: result.result.buildAttempts,
         warnings: result.result.warnings,
       };

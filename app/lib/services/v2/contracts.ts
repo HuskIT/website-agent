@@ -15,6 +15,27 @@ export const V2BusinessProfileSchema = z.object({
   generated_content: z.unknown().optional(),
   google_maps_markdown: z.string().optional(),
   website_markdown: z.string().optional(),
+  v2_runtime: z
+    .object({
+      provider: z.literal('e2b'),
+      sandbox_id: z.string().optional(),
+      workspace_id: z.string().optional(),
+      session_id: z.string().optional(),
+      preview_url: z.string().nullable().optional(),
+      lifecycle: z.enum(['running', 'completed', 'failed']),
+      workspace_reused: z.boolean().optional(),
+      build_attempts: z.number().int().nonnegative().optional(),
+      warnings: z.array(z.string()).optional(),
+      memory: z
+        .object({
+          enabled: z.boolean(),
+          resource_id: z.string().optional(),
+          thread_id: z.string().optional(),
+        })
+        .optional(),
+      updated_at: z.string(),
+    })
+    .optional(),
 });
 
 export type V2BusinessProfile = z.infer<typeof V2BusinessProfileSchema>;

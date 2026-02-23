@@ -64,6 +64,8 @@ describe('api.v2.site.bootstrap crawler integration', () => {
     mockGetV2Flags.mockReturnValue({
       mastraEnabled: true,
       waitingInsightsEnabled: false,
+      workspaceEnabled: false,
+      memoryEnabled: false,
     });
     mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
     mockGenerateGoogleMapsMarkdown.mockResolvedValue({

@@ -5,13 +5,11 @@ import type { GeneratedFile, GenerationSSEEvent } from '~/types/generation';
 import { createScopedLogger } from '~/utils/logger';
 import { getThemeByTemplateName, RESTAURANT_THEMES } from '~/theme-prompts/registry';
 import { streamText } from '~/lib/.server/llm/stream-text';
-import { saveSnapshot } from '~/lib/services/projects.server';
 import type { FileMap } from '~/lib/stores/files';
 import { WORK_DIR, MODEL_REGEX, PROVIDER_REGEX, STARTER_TEMPLATES } from '~/utils/constants';
 import { getFastModel } from '~/lib/services/fastModelResolver';
 import { resolveTemplate, applyIgnorePatterns, buildTemplatePrimingMessages } from '~/lib/.server/templates';
 import type { TemplateFile } from '~/lib/.server/templates/github-template-fetcher';
-import { createTrace, createGeneration, flushTraces, isLangfuseEnabled } from '~/lib/.server/telemetry/langfuse.server';
 import {
   analyzeBusinessProfile,
   buildTemplateSelectionContextPrompt,
@@ -23,6 +21,31 @@ import { buildPromptTracePayload } from '~/lib/services/v2/promptTrace';
 import { validateContentGeneration } from './contentGenerationValidator';
 
 const logger = createScopedLogger('projectGenerationService');
+
+type LangfuseTelemetryModule = typeof import('~/lib/.server/telemetry/langfuse.server');
+
+function isLangfuseEnabledFromEnv(env?: Env): boolean {
+  if (env?.LANGFUSE_ENABLED) {
+    return env.LANGFUSE_ENABLED === 'true';
+  }
+
+  return process.env.LANGFUSE_ENABLED === 'true';
+}
+
+async function getLangfuseTelemetry(env?: Env): Promise<LangfuseTelemetryModule | null> {
+  if (!isLangfuseEnabledFromEnv(env)) {
+    return null;
+  }
+
+  try {
+    return await import('~/lib/.server/telemetry/langfuse.server');
+  } catch (error) {
+    logger.warn('[LANGFUSE] Telemetry disabled: failed to load langfuse module', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 /**
  * Maximum number of content generation attempts before giving up.
@@ -490,13 +513,14 @@ export async function* generateContent(
   logger.info(`[CONTENT_GEN] Template files (${allTemplateFiles.length}):`);
 
   for (const file of allTemplateFiles) {
-    logger.info(`  [TEMPLATE] ${file.path} (${file.content.length} chars)`);
+    const normalizedPath = normalizeFilePath(file.path);
+    logger.info(`  [TEMPLATE] ${normalizedPath} (${file.content.length} chars)`);
 
     // Convert TemplateFile to GeneratedFile by adding size property
     yield {
       event: 'file',
       data: {
-        path: file.path,
+        path: normalizedPath,
         content: file.content,
         size: file.content.length,
       },
@@ -636,8 +660,10 @@ async function* _generateContentAttempt(
     businessProfile.crawled_data?.name ||
     'Restaurant';
 
-  // Create Langfuse trace for content generation
-  const traceContext = createTrace(env, {
+  const telemetry = await getLangfuseTelemetry(env);
+
+  // Create Langfuse trace for content generation (optional).
+  const traceContext = telemetry?.createTrace(env, {
     name: 'content-generation',
     metadata: { themeId, model, provider: provider.name, businessName, attemptNumber },
     input: { businessName, themeId, model, attemptNumber },
@@ -701,7 +727,7 @@ async function* _generateContentAttempt(
 
   // Create Langfuse generation for streamText - capture full input
   const generation = traceContext
-    ? createGeneration(env, traceContext, {
+    ? telemetry?.createGeneration(env, traceContext, {
         name: 'stream-text-content',
         model,
         input: {
@@ -776,8 +802,8 @@ async function* _generateContentAttempt(
     });
 
     // Flush Langfuse traces
-    if (isLangfuseEnabled(env)) {
-      flushTraces(env).catch((err) => logger.error('Failed to flush Langfuse traces', err));
+    if (telemetry?.isLangfuseEnabled(env)) {
+      telemetry.flushTraces(env).catch((err) => logger.error('Failed to flush Langfuse traces', err));
     }
   }
 
@@ -827,6 +853,8 @@ export async function saveGeneratedSnapshot(
   files: FileMap,
   userId: string,
 ): Promise<SaveSnapshotResponse> {
+  const { saveSnapshot } = await import('~/lib/services/projects.server');
+
   return await saveSnapshot(projectId, { files }, userId);
 }
 

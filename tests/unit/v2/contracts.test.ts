@@ -19,10 +19,22 @@ describe('v2 contracts', () => {
         session_id: 'session-abc',
         google_maps_markdown: '# Google Maps markdown',
         website_markdown: '# Website markdown',
+        v2_runtime: {
+          provider: 'e2b',
+          sandbox_id: 'v2-project-123',
+          lifecycle: 'running',
+          updated_at: '2026-02-23T00:00:00.000Z',
+          memory: {
+            enabled: true,
+            resource_id: 'project:project-123',
+            thread_id: 'bootstrap:session-abc',
+          },
+        },
       },
     });
 
     expect(parsed.businessProfile?.place_id).toBe('place-xyz');
+    expect(parsed.businessProfile?.v2_runtime?.provider).toBe('e2b');
   });
 
   it('rejects empty bootstrap payload', () => {
@@ -57,4 +69,3 @@ describe('v2 contracts', () => {
     expect(response.status).toBe('preview');
   });
 });
-

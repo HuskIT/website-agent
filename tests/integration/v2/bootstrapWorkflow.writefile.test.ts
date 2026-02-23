@@ -165,6 +165,7 @@ describe('bootstrapWebsite workflow write_file integration', () => {
     expect(result.success).toBe(true);
     expect(result.generatedFiles).toHaveLength(2);
     expect(result.preview?.url).toContain('sandbox-preview');
+    expect(result.runtimeSessionId).toBe(runtimeSession.sessionId);
   });
 
   it('enforces bounded build retries and cleans up on failure', async () => {

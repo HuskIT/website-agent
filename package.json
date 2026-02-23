@@ -36,6 +36,7 @@
     "v2:sandbox:health": "node --import tsx scripts/v2-sandbox-health.ts",
     "v2:test:phase012:real": "node --import tsx scripts/v2-phase012-real-test.ts",
     "v2:test:step6:real": "node --import tsx scripts/v2-step6-real-test.ts",
+    "v2:test:kimi:real": "V2_REAL_RUN_KIMI=true pnpm exec vitest run tests/integration/v2/bootstrapWorkflow.kimi.real.test.ts",
     "templates:seed": "pnpm exec tsx scripts/templates/seed-registry.ts",
     "templates:clone": "pnpm exec tsx scripts/templates/clone-starters.ts",
     "electron:dev": "node scripts/electron-dev.mjs",

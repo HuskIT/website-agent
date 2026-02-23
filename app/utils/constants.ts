@@ -18,7 +18,11 @@ export const TOOL_EXECUTION_DENIED = 'Error: User denied access to tool executio
 export const TOOL_EXECUTION_ERROR = 'Error: An error occured while calling tool';
 
 const isTest = typeof process !== 'undefined' && !!process.env?.VITEST;
-const llmManager = isTest ? null : LLMManager.getInstance(import.meta.env, { defaultProvider: DEFAULT_PROVIDER_NAME });
+const allowProvidersInTest = typeof process !== 'undefined' && process.env?.V2_REAL_RUN_KIMI === 'true';
+const llmManager =
+  isTest && !allowProvidersInTest
+    ? null
+    : LLMManager.getInstance(import.meta.env, { defaultProvider: DEFAULT_PROVIDER_NAME });
 
 export const PROVIDER_LIST = llmManager ? llmManager.getAllProviders() : [];
 export const DEFAULT_PROVIDER = llmManager ? llmManager.getDefaultProvider() : undefined;

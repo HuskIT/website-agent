@@ -3,14 +3,21 @@ import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/c
 import { getSession } from '~/lib/auth/session.server';
 import { getV2Flags } from '~/lib/config/v2Flags';
 import { createMastraCore } from '~/lib/mastra/factory.server';
+import { buildBootstrapMemoryScope } from '~/lib/mastra/memory/scope';
 import {
   crawlWebsiteMarkdown,
   extractBusinessData,
   generateGoogleMapsMarkdown,
   searchRestaurant,
 } from '~/lib/services/crawlerClient.server';
+import { getProjectById, updateProject } from '~/lib/services/projects.server';
 import { adaptBootstrapInput } from '~/lib/services/v2/bootstrapInputAdapter';
 import { runV2DatabasePreflight } from '~/lib/services/v2/databasePreflight.server';
+import {
+  buildV2RuntimeState,
+  mergeBusinessProfileRuntime,
+  readV2RuntimeState,
+} from '~/lib/services/v2/runtimeMetadata';
 import {
   V2BootstrapRequestSchema,
   V2BootstrapSSEEventSchema,
@@ -64,6 +71,7 @@ function buildProjectAdapterInput(
     websiteMarkdown?: string;
     extractData?: BusinessData;
   },
+  baseProfile?: BusinessProfile | null,
 ): Pick<ProjectWithDetails, 'id' | 'name' | 'business_profile'> | null {
   if (!input.projectId) {
     return null;
@@ -73,6 +81,7 @@ function buildProjectAdapterInput(
     id: input.projectId,
     name: input.businessName ?? 'Untitled Business',
     business_profile: {
+      ...(baseProfile ?? {}),
       place_id: data.placeId,
       session_id: data.sessionId,
       gmaps_url: input.mapsUrl ?? input.businessProfile?.gmaps_url,
@@ -260,8 +269,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        const requestedProjectId = parsedBody.data.projectId;
+        const existingProject = requestedProjectId ? await getProjectById(requestedProjectId, session.user.id) : null;
+        const existingBusinessProfile = existingProject?.business_profile ?? null;
+        const previousRuntimeState =
+          readV2RuntimeState(existingBusinessProfile) ||
+          readV2RuntimeState(parsedBody.data.businessProfile as BusinessProfile | undefined);
         const crawlerData = await resolveCrawlerData(parsedBody.data);
-        const projectCandidate = buildProjectAdapterInput(parsedBody.data, crawlerData);
+        const projectCandidate = buildProjectAdapterInput(parsedBody.data, crawlerData, existingBusinessProfile);
         const adaptedInput = adaptBootstrapInput({
           project: projectCandidate,
           searchResult:
@@ -282,6 +297,11 @@ export async function action({ request }: ActionFunctionArgs) {
         });
 
         const workflowProjectId = adaptedInput.projectId ?? parsedBody.data.projectId ?? crypto.randomUUID();
+        const memoryScope = flags.memoryEnabled
+          ? buildBootstrapMemoryScope(workflowProjectId, crawlerData.sessionId)
+          : undefined;
+        const reusableSandboxId = flags.workspaceEnabled ? previousRuntimeState?.sandbox_id : undefined;
+        const workspaceReuseRequested = Boolean(reusableSandboxId);
         const businessProfile: BusinessProfile = {
           place_id: adaptedInput.placeId ?? adaptedInput.businessProfile?.place_id,
           session_id: adaptedInput.sessionId ?? adaptedInput.businessProfile?.session_id,
@@ -296,6 +316,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const providerSettings = getProviderSettingsFromCookie(cookieHeader);
         const hasMoonshotKey = Boolean(apiKeys.MOONSHOT_API_KEY || process.env.MOONSHOT_API_KEY);
         const hasE2BKey = Boolean(process.env.E2B_API_KEY || process.env.E2B_API_TOKEN || process.env.E2B_ACCESS_TOKEN);
+        const hasWorkspaceRuntime = flags.workspaceEnabled && hasE2BKey;
         const shouldRunAutonomous = Boolean(businessProfile.google_maps_markdown && hasMoonshotKey);
         const provider = {
           name: DEFAULT_PROVIDER?.name ?? 'Moonshot',
@@ -315,10 +336,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 apiKeys,
                 providerSettings,
               },
-              runtime: hasE2BKey
+              runtime: hasWorkspaceRuntime
                 ? {
                     workspace: {
                       projectId: workflowProjectId,
+                      sandboxId: reusableSandboxId,
                     },
                     buildCwd: '/home/project',
                     installCommand: 'pnpm install',
@@ -373,7 +395,11 @@ export async function action({ request }: ActionFunctionArgs) {
               projectId: workflowProjectId,
               mode: shouldRunAutonomous ? 'mastra_autonomous' : 'mastra_seed',
               strategy: mastraCore.mutationStrategy.mode,
-              hasE2BSandbox: hasE2BKey,
+              hasE2BSandbox: hasWorkspaceRuntime,
+              workspaceEnabled: flags.workspaceEnabled,
+              workspaceReuseRequested,
+              memoryEnabled: flags.memoryEnabled,
+              memoryScope: memoryScope ?? null,
             }),
           ),
         );
@@ -383,6 +409,41 @@ export async function action({ request }: ActionFunctionArgs) {
             inMemoryWrites.set(filePath, content);
           },
         });
+        const persistenceProjectId = requestedProjectId ?? adaptedInput.projectId ?? null;
+        let persistenceWarning: string | null = null;
+        let runtimePersisted = false;
+
+        if (persistenceProjectId) {
+          const runtimeState = buildV2RuntimeState({
+            sandboxId: workflowResult.runtimeSessionId ?? reusableSandboxId,
+            workspaceId: `v2-${workflowProjectId}`,
+            sessionId: crawlerData.sessionId,
+            previewUrl: workflowResult.preview?.url ?? null,
+            lifecycle: workflowResult.preview?.url ? 'running' : workflowResult.success ? 'completed' : 'failed',
+            workspaceReused: workspaceReuseRequested,
+            buildAttempts: workflowResult.buildAttempts ?? 0,
+            warnings: workflowResult.warnings ?? [],
+            memory: memoryScope
+              ? {
+                  enabled: true,
+                  resource_id: memoryScope.resourceId,
+                  thread_id: memoryScope.threadId,
+                }
+              : {
+                  enabled: false,
+                },
+          });
+          const profileWithRuntime = mergeBusinessProfileRuntime(businessProfile, runtimeState);
+
+          try {
+            await updateProject(persistenceProjectId, session.user.id, {
+              business_profile: profileWithRuntime,
+            });
+            runtimePersisted = true;
+          } catch (error) {
+            persistenceWarning = error instanceof Error ? error.message : 'Failed to persist V2 runtime state';
+          }
+        }
 
         controller.enqueue(
           toSSEChunk(
@@ -408,9 +469,24 @@ export async function action({ request }: ActionFunctionArgs) {
               },
               generatedFiles: workflowResult.generatedFiles?.length ?? inMemoryWrites.size,
               buildAttempts: workflowResult.buildAttempts ?? 0,
-              warnings: workflowResult.warnings ?? [],
+              warnings: persistenceWarning
+                ? [...(workflowResult.warnings ?? []), `runtime_persistence_warning: ${persistenceWarning}`]
+                : (workflowResult.warnings ?? []),
               placeId: crawlerData.placeId,
               sessionId: crawlerData.sessionId,
+              runtime: {
+                provider: workflowResult.preview?.url ? 'e2b' : 'none',
+                runtimeSessionId: workflowResult.runtimeSessionId ?? null,
+                workspaceReuseRequested,
+                sandboxId: workflowResult.runtimeSessionId ?? reusableSandboxId ?? null,
+              },
+              persistence: {
+                attempted: Boolean(persistenceProjectId),
+                projectId: persistenceProjectId,
+                persisted: runtimePersisted,
+                warning: persistenceWarning,
+              },
+              memoryScope: memoryScope ?? null,
               markdown: {
                 googleMapsLength: crawlerData.googleMapsMarkdown?.length ?? 0,
                 websiteLength: crawlerData.websiteMarkdown?.length ?? 0,

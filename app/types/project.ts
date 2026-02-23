@@ -94,12 +94,41 @@ export interface BusinessProfile {
    * Optional - only populated if restaurant has a website.
    */
   website_markdown?: string;
+
+  /**
+   * V2 runtime session metadata (Mastra + E2B).
+   * Used for workspace reuse and runtime continuity in V2 flows.
+   */
+  v2_runtime?: V2RuntimeState;
+}
+
+export type V2RuntimeLifecycle = 'running' | 'completed' | 'failed';
+
+export interface V2RuntimeMemoryScope {
+  enabled: boolean;
+  resource_id?: string;
+  thread_id?: string;
+}
+
+export interface V2RuntimeState {
+  provider: 'e2b';
+  sandbox_id?: string;
+  workspace_id?: string;
+  session_id?: string;
+  preview_url?: string | null;
+  lifecycle: V2RuntimeLifecycle;
+  workspace_reused?: boolean;
+  build_attempts?: number;
+  warnings?: string[];
+  memory?: V2RuntimeMemoryScope;
+  updated_at: string;
 }
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string;
   status?: ProjectStatus;
+  business_profile?: BusinessProfile | null;
 
   /*
    * Sandbox provider fields (from 001-sandbox-providers feature)

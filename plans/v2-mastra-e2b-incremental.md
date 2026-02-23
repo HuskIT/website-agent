@@ -504,11 +504,40 @@ V1 remains live while V2 is feature-flagged.
 - Add rollout flags:
   - `V2_WORKSPACE_ENABLED`
   - `V2_MEMORY_ENABLED`
+- Status: `Completed (slice 2, 2026-02-23)`
+  - Added feature flags:
+    - `V2_WORKSPACE_ENABLED`
+    - `V2_MEMORY_ENABLED`
+    - in `app/lib/config/v2Flags.ts` and `.env.example`
+  - Added typed runtime metadata model on `business_profile`:
+    - `v2_runtime` in `app/types/project.ts`
+    - helpers in `app/lib/services/v2/runtimeMetadata.ts`
+  - Added memory scope scaffold:
+    - `app/lib/mastra/memory/scope.ts`
+  - Wired `app/routes/api.v2.site.bootstrap.ts` to:
+    - read prior runtime metadata for workspace reuse (`sandbox_id`) when `V2_WORKSPACE_ENABLED=true`
+    - include memory scope IDs in SSE when `V2_MEMORY_ENABLED=true`
+    - persist updated runtime metadata back to `projects.business_profile.v2_runtime` (best-effort)
+  - Extended workflow output with `runtimeSessionId` for persistence linkage.
+  - Added integration coverage for persistence + reuse:
+    - `tests/integration/api.v2.site.bootstrap.persistence.test.ts`
+    - verifies sandbox reuse id is passed into workflow runtime input
+    - verifies `updateProject(...business_profile.v2_runtime...)` persistence payload
 
 **Verify**
 - Add and run: `pnpm exec vitest run tests/integration/v2/previewPersistence.test.ts`
 - Add and run: `pnpm exec vitest run tests/integration/v2/workspaceSessionReuse.test.ts`
 - Add and run: `pnpm exec vitest run tests/unit/services/v2/memoryWiring.test.ts`
+- Slice 1 verification run:
+  - `pnpm run typecheck`
+  - `pnpm exec vitest run tests/unit/v2/flags.test.ts`
+  - `pnpm exec vitest run tests/unit/services/v2/runtimeMetadata.test.ts`
+  - `pnpm exec vitest run tests/unit/mastra/memoryScope.test.ts`
+  - plus route/workflow regression suite (stream/crawler/bootstrap workflow/mastra unit tests)
+- Slice 2 verification run:
+  - `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.persistence.test.ts`
+  - `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.stream.test.ts`
+  - `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.crawler.test.ts`
 
 **Done when**
 - Preview/session continuity is reliable and memory hooks are ready for iterative edits.
@@ -577,7 +606,7 @@ V1 remains live while V2 is feature-flagged.
 
 ## Immediate Next Execution
 
-1. Step 7: persist runtime/workspace metadata from V2 bootstrap runs (sandbox/session/preview state).
-2. Add project-scoped workspace session reuse wiring with feature flag gates.
-3. Add memory scaffolding behind `V2_MEMORY_ENABLED` without changing current user flow.
-4. Stop for your review before implementing waiting-screen insights (Step 8).
+1. Step 8: implement waiting-screen insights service (deterministic facts from crawler markdown first).
+2. Keep insights LLM enrichment behind `V2_WAITING_INSIGHTS_ENABLED`.
+3. Add unit tests for deterministic insight extraction and fallback behavior.
+4. Stop for your review before wiring the lean V2 UI shell (Step 9).

@@ -23,6 +23,8 @@ describe('api.v2.sandbox.health', () => {
     mockGetV2Flags.mockReturnValue({
       mastraEnabled: true,
       waitingInsightsEnabled: false,
+      workspaceEnabled: false,
+      memoryEnabled: false,
     });
     mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
   });
@@ -38,6 +40,8 @@ describe('api.v2.sandbox.health', () => {
     mockGetV2Flags.mockReturnValue({
       mastraEnabled: false,
       waitingInsightsEnabled: false,
+      workspaceEnabled: false,
+      memoryEnabled: false,
     });
 
     const request = new Request('http://localhost/api/v2/sandbox/health', { method: 'POST' });
