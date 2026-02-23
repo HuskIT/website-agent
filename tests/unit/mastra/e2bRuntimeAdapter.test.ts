@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { WORKSPACE_TOOLS } from '@mastra/core/workspace';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   E2BRuntimeAdapter,
   normalizeSandboxPath,
-  type V2RuntimeSession,
 } from '~/lib/mastra/runtime/e2bRuntimeAdapter.server';
 
 function createMockRuntime() {
@@ -16,7 +16,6 @@ function createMockRuntime() {
     command: 'node',
     args: ['--version'],
   }));
-  const commandsRun = vi.fn(async () => ({ pid: 4321 }));
   const workspace = {
     init: vi.fn(async () => undefined),
     destroy: vi.fn(async () => undefined),
@@ -26,7 +25,6 @@ function createMockRuntime() {
     executeCommand,
     instance: {
       files: { write: writeFile },
-      commands: { run: commandsRun },
       getHost: (port: number) => `https://sandbox-123-${port}.example.com`,
     },
   } as any;
@@ -34,20 +32,35 @@ function createMockRuntime() {
   return {
     workspace,
     sandbox,
+    filesystemPath: '/tmp/huskit-v2-workspaces/project-1/v2-project-1',
     writeFile,
     executeCommand,
-    commandsRun,
   };
 }
 
 describe('mastra e2bRuntimeAdapter', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+      })),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('creates a runtime session and initializes workspace', async () => {
     const runtime = createMockRuntime();
     const workspaceFactory = vi.fn(() => ({
       workspace: runtime.workspace,
       sandbox: runtime.sandbox,
+      filesystemPath: runtime.filesystemPath,
     }));
-    const adapter = new E2BRuntimeAdapter(workspaceFactory);
+    const createTools = vi.fn(() => ({}));
+    const adapter = new E2BRuntimeAdapter(workspaceFactory, createTools);
 
     const session = await adapter.createSession({
       projectId: 'project-1',
@@ -61,18 +74,25 @@ describe('mastra e2bRuntimeAdapter', () => {
       projectId: 'project-1',
       apiKey: 'test-key',
     });
+    expect(createTools).toHaveBeenCalledTimes(1);
+    expect(session.tools).toEqual({});
+    expect(session.filesystemPath).toBeDefined();
   });
 
-  it('writes files with normalized sandbox paths', async () => {
+  it('writes files with normalized sandbox paths when write tool is unavailable', async () => {
     const runtime = createMockRuntime();
-    const adapter = new E2BRuntimeAdapter(() => ({
-      workspace: runtime.workspace,
-      sandbox: runtime.sandbox,
-    }));
-    const session = (await adapter.createSession({
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({}),
+    );
+    const session = await adapter.createSession({
       projectId: 'project-1',
       apiKey: 'test-key',
-    })) as V2RuntimeSession;
+    });
 
     const result = await adapter.writeFiles(session, [
       { path: 'src/data/content.ts', content: 'export const content = {};' },
@@ -82,18 +102,71 @@ describe('mastra e2bRuntimeAdapter', () => {
     expect(result.written).toBe(2);
     expect(runtime.writeFile).toHaveBeenNthCalledWith(
       1,
-      '/home/user/src/data/content.ts',
+      '/home/project/src/data/content.ts',
       'export const content = {};',
     );
     expect(runtime.writeFile).toHaveBeenNthCalledWith(2, '/home/user/README.md', '# Demo');
   });
 
-  it('executes commands in sandbox', async () => {
+  it('uses workspace write tool when available', async () => {
     const runtime = createMockRuntime();
-    const adapter = new E2BRuntimeAdapter(() => ({
-      workspace: runtime.workspace,
-      sandbox: runtime.sandbox,
-    }));
+    const writeToolExecute = vi.fn(async () => 'ok');
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({
+        [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
+          execute: writeToolExecute,
+        },
+      }),
+    );
+    const session = await adapter.createSession({
+      projectId: 'project-1',
+      apiKey: 'test-key',
+    });
+
+    await adapter.writeFiles(session, [{ path: 'src/data/content.ts', content: 'export const content = {};' }]);
+
+    expect(writeToolExecute).toHaveBeenCalledWith(
+      {
+        path: '/home/project/src/data/content.ts',
+        content: 'export const content = {};',
+        overwrite: true,
+      },
+      { workspace: runtime.workspace },
+    );
+    expect(runtime.writeFile).toHaveBeenCalledWith('/home/project/src/data/content.ts', 'export const content = {};');
+  });
+
+  it('executes commands through workspace execute tool when available', async () => {
+    const runtime = createMockRuntime();
+    const executeTool = vi.fn(async (_input, context: any) => {
+      await context?.writer?.custom({
+        type: 'data-sandbox-stdout',
+        data: { output: 'install ok\n' },
+      });
+      await context?.writer?.custom({
+        type: 'data-sandbox-exit',
+        data: { exitCode: 0, success: true, executionTimeMs: 11 },
+      });
+
+      return 'install ok';
+    });
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({
+        [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
+          execute: executeTool,
+        },
+      }),
+    );
     const session = await adapter.createSession({
       projectId: 'project-1',
       apiKey: 'test-key',
@@ -104,19 +177,67 @@ describe('mastra e2bRuntimeAdapter', () => {
       timeout: 30_000,
     });
 
-    expect(runtime.executeCommand).toHaveBeenCalledWith('npm', ['install'], {
-      cwd: '/home/user',
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(commandResult.exitCode).toBe(0);
+    expect(commandResult.success).toBe(true);
+    expect(commandResult.stdout).toContain('install ok');
+    expect(runtime.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sandbox command execution when env override is provided', async () => {
+    const runtime = createMockRuntime();
+    const executeTool = vi.fn(async () => 'unused');
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({
+        [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
+          execute: executeTool,
+        },
+      }),
+    );
+    const session = await adapter.createSession({
+      projectId: 'project-1',
+      apiKey: 'test-key',
+    });
+
+    const commandResult = await adapter.runCommand(session, 'npm', ['install'], {
+      cwd: '/home/project',
       timeout: 30_000,
+      env: { NODE_ENV: 'production' },
+    });
+
+    expect(runtime.executeCommand).toHaveBeenCalledWith('npm', ['install'], {
+      cwd: '/home/project',
+      timeout: 30_000,
+      env: { NODE_ENV: 'production' },
     });
     expect(commandResult.exitCode).toBe(0);
+    expect(executeTool).not.toHaveBeenCalled();
   });
 
   it('starts preview command and resolves preview URL', async () => {
     const runtime = createMockRuntime();
-    const adapter = new E2BRuntimeAdapter(() => ({
-      workspace: runtime.workspace,
-      sandbox: runtime.sandbox,
-    }));
+    runtime.executeCommand.mockResolvedValueOnce({
+      success: true,
+      exitCode: 0,
+      stdout: '4321\n',
+      stderr: '',
+      executionTimeMs: 4,
+      command: 'bash',
+      args: ['-lc', 'noop'],
+    });
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({}),
+    );
     const session = await adapter.createSession({
       projectId: 'project-1',
       apiKey: 'test-key',
@@ -124,21 +245,27 @@ describe('mastra e2bRuntimeAdapter', () => {
 
     const preview = await adapter.startPreview(session, { port: 4173 });
 
-    expect(runtime.commandsRun).toHaveBeenCalledWith('npm run dev -- --host 0.0.0.0 --port 4173', {
-      background: true,
-      cwd: '/home/user',
-      envs: undefined,
-    });
+    expect(runtime.executeCommand).toHaveBeenCalledWith(
+      'bash',
+      expect.arrayContaining(['-lc', expect.stringContaining('nohup npm run dev -- --host 0.0.0.0 --port 4173')]),
+      {
+        cwd: '/home/project',
+      },
+    );
     expect(preview.url).toBe('https://sandbox-123-4173.example.com');
     expect(preview.pid).toBe(4321);
   });
 
   it('cleans up workspace resources', async () => {
     const runtime = createMockRuntime();
-    const adapter = new E2BRuntimeAdapter(() => ({
-      workspace: runtime.workspace,
-      sandbox: runtime.sandbox,
-    }));
+    const adapter = new E2BRuntimeAdapter(
+      () => ({
+        workspace: runtime.workspace,
+        sandbox: runtime.sandbox,
+        filesystemPath: runtime.filesystemPath,
+      }),
+      () => ({}),
+    );
     const session = await adapter.createSession({
       projectId: 'project-1',
       apiKey: 'test-key',
@@ -150,8 +277,8 @@ describe('mastra e2bRuntimeAdapter', () => {
   });
 
   it('normalizes sandbox file paths and blocks parent traversal', () => {
-    expect(normalizeSandboxPath('src/main.ts')).toBe('/home/user/src/main.ts');
-    expect(normalizeSandboxPath('/home/user/app.ts')).toBe('/home/user/app.ts');
+    expect(normalizeSandboxPath('src/main.ts')).toBe('/home/project/src/main.ts');
+    expect(normalizeSandboxPath('/home/project/app.ts')).toBe('/home/project/app.ts');
     expect(() => normalizeSandboxPath('../secrets.txt')).toThrow('Parent directory traversal is not allowed');
   });
 });

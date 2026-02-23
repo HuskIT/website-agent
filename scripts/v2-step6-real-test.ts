@@ -15,6 +15,7 @@ loadEnv({ path: '.env.local', override: true });
 const DEFAULT_BUSINESS_NAME = 'Starbucks Reserve Roastery New York';
 const DEFAULT_BUSINESS_ADDRESS = '61 9th Ave, New York, NY 10011';
 const DEFAULT_PREVIEW_PORT = 4173;
+const DEFAULT_SANDBOX_WORKDIR = '/home/project';
 
 function resolveE2BApiKey(): string | undefined {
   return process.env.E2B_API_KEY || process.env.E2B_API_TOKEN || process.env.E2B_ACCESS_TOKEN;
@@ -40,7 +41,7 @@ function createPreviewCommand(port: number): string {
   const program = `
 const http = require('node:http');
 const fs = require('node:fs');
-const file = '/home/user/index.html';
+const file = '/home/project/index.html';
 http
   .createServer((_req, res) => {
     try {
@@ -283,19 +284,19 @@ async function main(): Promise<void> {
 
   const seedFiles = [
     {
-      path: '/home/user/index.html',
+      path: '/home/project/index.html',
       content: htmlPreview,
     },
     {
-      path: '/home/user/data/google-maps.md',
+      path: '/home/project/data/google-maps.md',
       content: crawlerData.googleMapsMarkdown || '# Google Maps markdown unavailable',
     },
     {
-      path: '/home/user/data/website.md',
+      path: '/home/project/data/website.md',
       content: crawlerData.websiteMarkdown || '# Website markdown unavailable',
     },
     {
-      path: '/home/user/data/business-profile.json',
+      path: '/home/project/data/business-profile.json',
       content: JSON.stringify(
         {
           businessName,
@@ -323,13 +324,13 @@ async function main(): Promise<void> {
           projectId,
           apiKey,
         },
-        buildCwd: '/home/user',
+        buildCwd: DEFAULT_SANDBOX_WORKDIR,
         installCommand: '',
         buildCommand: createBuildCommand(),
         maxBuildAttempts: 2,
         preview: {
           port: previewPort,
-          cwd: '/home/user',
+          cwd: DEFAULT_SANDBOX_WORKDIR,
           command: createPreviewCommand(previewPort),
         },
       },

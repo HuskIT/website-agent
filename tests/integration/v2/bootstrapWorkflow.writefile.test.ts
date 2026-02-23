@@ -38,6 +38,8 @@ function createRuntimeSessionMock(): V2RuntimeSession {
       destroy: vi.fn(async () => undefined),
     } as any,
     sandbox: {} as any,
+    filesystemPath: '/tmp/huskit-v2-workspaces/project-1/v2-project-1',
+    tools: {},
   };
 }
 

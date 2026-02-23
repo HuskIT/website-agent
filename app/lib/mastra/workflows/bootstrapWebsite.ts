@@ -372,6 +372,9 @@ export function createBootstrapWebsiteWorkflow(
             fastProvider: (generation.fastProvider ?? generation.provider) as ProviderInfo,
             baseUrl: generation.baseUrl,
             cookieHeader: generation.cookieHeader ?? null,
+            env: generation.env,
+            apiKeys: generation.apiKeys,
+            providerSettings: generation.providerSettings as Record<string, IProviderSetting>,
           });
 
           return {

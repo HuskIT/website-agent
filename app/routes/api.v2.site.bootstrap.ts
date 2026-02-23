@@ -34,6 +34,8 @@ import type { BusinessProfile, ProjectWithDetails } from '~/types/project';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from '~/utils/constants';
 
 const encoder = new TextEncoder();
+const DEFAULT_SANDBOX_WORKDIR = '/home/project';
+const MAX_GENERATED_FILE_PATHS = 24;
 
 function toSSEChunk(event: V2BootstrapSSEEvent): Uint8Array {
   return encoder.encode(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
@@ -124,6 +126,12 @@ function buildSeedOperations(params: {
       ),
     },
   ];
+}
+
+function dedupeNonEmpty(values: Array<string | null | undefined>): string[] {
+  const deduped = [...new Set(values.map((value) => value?.trim() ?? '').filter(Boolean))];
+
+  return deduped;
 }
 
 async function resolveCrawlerData(input: V2BootstrapRequest): Promise<{
@@ -300,8 +308,6 @@ export async function action({ request }: ActionFunctionArgs) {
         const memoryScope = flags.memoryEnabled
           ? buildBootstrapMemoryScope(workflowProjectId, crawlerData.sessionId)
           : undefined;
-        const reusableSandboxId = flags.workspaceEnabled ? previousRuntimeState?.sandbox_id : undefined;
-        const workspaceReuseRequested = Boolean(reusableSandboxId);
         const businessProfile: BusinessProfile = {
           place_id: adaptedInput.placeId ?? adaptedInput.businessProfile?.place_id,
           session_id: adaptedInput.sessionId ?? adaptedInput.businessProfile?.session_id,
@@ -315,9 +321,33 @@ export async function action({ request }: ActionFunctionArgs) {
         const apiKeys = getApiKeysFromCookie(cookieHeader);
         const providerSettings = getProviderSettingsFromCookie(cookieHeader);
         const hasMoonshotKey = Boolean(apiKeys.MOONSHOT_API_KEY || process.env.MOONSHOT_API_KEY);
-        const hasE2BKey = Boolean(process.env.E2B_API_KEY || process.env.E2B_API_TOKEN || process.env.E2B_ACCESS_TOKEN);
-        const hasWorkspaceRuntime = flags.workspaceEnabled && hasE2BKey;
         const shouldRunAutonomous = Boolean(businessProfile.google_maps_markdown && hasMoonshotKey);
+        const hasGoogleMapsMarkdown = Boolean(businessProfile.google_maps_markdown);
+        const hasE2BKey = Boolean(process.env.E2B_API_KEY || process.env.E2B_API_TOKEN || process.env.E2B_ACCESS_TOKEN);
+        const workspaceRuntimeAutoEnabled = shouldRunAutonomous && !flags.workspaceEnabled;
+        const workspaceRuntimeRequested = flags.workspaceEnabled || workspaceRuntimeAutoEnabled;
+        const hasWorkspaceRuntime = workspaceRuntimeRequested && hasE2BKey;
+        const reusableSandboxId = hasWorkspaceRuntime ? previousRuntimeState?.sandbox_id : undefined;
+        const workspaceReuseRequested = Boolean(reusableSandboxId);
+        const bootstrapWarnings = dedupeNonEmpty([
+          shouldRunAutonomous
+            ? null
+            : hasMoonshotKey
+              ? null
+              : 'autonomous_generation_disabled_missing_moonshot_api_key',
+          shouldRunAutonomous
+            ? null
+            : hasGoogleMapsMarkdown
+              ? null
+              : 'autonomous_generation_disabled_missing_google_maps_markdown',
+          hasWorkspaceRuntime
+            ? workspaceRuntimeAutoEnabled
+              ? 'workspace_runtime_auto_enabled_for_autonomous_mode'
+              : null
+            : workspaceRuntimeRequested
+              ? 'workspace_runtime_disabled_missing_e2b_api_key'
+              : 'workspace_runtime_disabled_flag_off',
+        ]);
         const provider = {
           name: DEFAULT_PROVIDER?.name ?? 'Moonshot',
           staticModels: [],
@@ -342,7 +372,7 @@ export async function action({ request }: ActionFunctionArgs) {
                       projectId: workflowProjectId,
                       sandboxId: reusableSandboxId,
                     },
-                    buildCwd: '/home/project',
+                    buildCwd: DEFAULT_SANDBOX_WORKDIR,
                     installCommand: 'pnpm install',
                     buildCommand: 'pnpm run build',
                     maxBuildAttempts: 2,
@@ -397,9 +427,12 @@ export async function action({ request }: ActionFunctionArgs) {
               strategy: mastraCore.mutationStrategy.mode,
               hasE2BSandbox: hasWorkspaceRuntime,
               workspaceEnabled: flags.workspaceEnabled,
+              workspaceRuntimeRequested,
+              workspaceRuntimeAutoEnabled,
               workspaceReuseRequested,
               memoryEnabled: flags.memoryEnabled,
               memoryScope: memoryScope ?? null,
+              warnings: bootstrapWarnings,
             }),
           ),
         );
@@ -413,6 +446,12 @@ export async function action({ request }: ActionFunctionArgs) {
         let persistenceWarning: string | null = null;
         let runtimePersisted = false;
 
+        const generatedFilePaths = dedupeNonEmpty([
+          ...(workflowResult.generatedFiles?.map((file) => file.path) ?? []),
+          ...Array.from(inMemoryWrites.keys()),
+        ]).slice(0, MAX_GENERATED_FILE_PATHS);
+        const combinedWarnings = dedupeNonEmpty([...bootstrapWarnings, ...(workflowResult.warnings ?? [])]);
+
         if (persistenceProjectId) {
           const runtimeState = buildV2RuntimeState({
             sandboxId: workflowResult.runtimeSessionId ?? reusableSandboxId,
@@ -422,7 +461,7 @@ export async function action({ request }: ActionFunctionArgs) {
             lifecycle: workflowResult.preview?.url ? 'running' : workflowResult.success ? 'completed' : 'failed',
             workspaceReused: workspaceReuseRequested,
             buildAttempts: workflowResult.buildAttempts ?? 0,
-            warnings: workflowResult.warnings ?? [],
+            warnings: combinedWarnings,
             memory: memoryScope
               ? {
                   enabled: true,
@@ -468,17 +507,22 @@ export async function action({ request }: ActionFunctionArgs) {
                 failures: workflowResult.mutation.failures.length,
               },
               generatedFiles: workflowResult.generatedFiles?.length ?? inMemoryWrites.size,
+              generatedFilePaths,
               buildAttempts: workflowResult.buildAttempts ?? 0,
               warnings: persistenceWarning
-                ? [...(workflowResult.warnings ?? []), `runtime_persistence_warning: ${persistenceWarning}`]
-                : (workflowResult.warnings ?? []),
+                ? dedupeNonEmpty([...combinedWarnings, `runtime_persistence_warning: ${persistenceWarning}`])
+                : combinedWarnings,
               placeId: crawlerData.placeId,
               sessionId: crawlerData.sessionId,
               runtime: {
                 provider: workflowResult.preview?.url ? 'e2b' : 'none',
                 runtimeSessionId: workflowResult.runtimeSessionId ?? null,
+                workspaceRuntimeRequested,
+                workspaceRuntimeEnabled: hasWorkspaceRuntime,
+                workspaceRuntimeAutoEnabled,
                 workspaceReuseRequested,
                 sandboxId: workflowResult.runtimeSessionId ?? reusableSandboxId ?? null,
+                sandboxWorkdir: hasWorkspaceRuntime ? DEFAULT_SANDBOX_WORKDIR : null,
               },
               persistence: {
                 attempted: Boolean(persistenceProjectId),
