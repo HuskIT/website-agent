@@ -76,4 +76,91 @@ describe('editorAgent', () => {
 
     expect(result.warnings).toContain('editor_output_missing_content_file');
   });
+
+  it('uses Mastra coding output first when available', async () => {
+    const generateContent = vi.fn(async function* () {
+      yield {
+        event: 'file' as const,
+        data: {
+          path: '/home/project/src/data/content.ts',
+          content: 'export const content = { source: "legacy" };',
+          size: 42,
+        },
+      };
+    });
+    const generateWithMastraAgent = vi.fn(async () => [
+      {
+        path: '/home/project/src/data/content.ts',
+        content: 'export const content = { source: "mastra" };',
+        size: 42,
+      },
+      {
+        path: '/home/project/README.md',
+        content: '# Demo',
+        size: 6,
+      },
+    ]);
+    const editor = createEditorAgent({
+      generateContent,
+      generateWithMastraAgent,
+    });
+
+    const result = await editor.run({
+      projectId: 'project-3',
+      businessProfile: {} as BusinessProfile,
+      template: {
+        themeId: 'boldfeastv2',
+        name: 'Bold Feast v2',
+      } as any,
+      model: 'kimi-for-coding',
+      provider: { name: 'Moonshot', staticModels: [] },
+      env: undefined,
+      apiKeys: {},
+      providerSettings: {},
+    });
+
+    expect(generateWithMastraAgent).toHaveBeenCalledTimes(1);
+    expect(generateContent).not.toHaveBeenCalled();
+    expect(result.generatedFiles.some((file) => file.content.includes('source: "mastra"'))).toBe(true);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('falls back to legacy generator when Mastra coding throws', async () => {
+    const generateContent = vi.fn(async function* () {
+      yield {
+        event: 'file' as const,
+        data: {
+          path: '/home/project/src/data/content.ts',
+          content: 'export const content = { source: "legacy" };',
+          size: 42,
+        },
+      };
+    });
+    const generateWithMastraAgent = vi.fn(async () => {
+      throw new Error('mastra coding failed');
+    });
+    const editor = createEditorAgent({
+      generateContent,
+      generateWithMastraAgent,
+    });
+
+    const result = await editor.run({
+      projectId: 'project-4',
+      businessProfile: {} as BusinessProfile,
+      template: {
+        themeId: 'boldfeastv2',
+        name: 'Bold Feast v2',
+      } as any,
+      model: 'kimi-for-coding',
+      provider: { name: 'Moonshot', staticModels: [] },
+      env: undefined,
+      apiKeys: {},
+      providerSettings: {},
+    });
+
+    expect(generateWithMastraAgent).toHaveBeenCalledTimes(1);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(result.generatedFiles.some((file) => file.content.includes('source: "legacy"'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.startsWith('editor_coding_agent_fallback:'))).toBe(true);
+  });
 });

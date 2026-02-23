@@ -490,6 +490,36 @@ V1 remains live while V2 is feature-flagged.
 
 ---
 
+**Step 6.6: Mastra-first coding agent for `content.ts` (fallback-safe)**
+- Implement Mastra coding agent as primary generation path in `EditorAgent`:
+  - load starter template files directly
+  - generate only `src/data/content.ts` via Mastra Agent JSON contract
+  - merge generated `content.ts` into template file set
+- Keep automatic fallback to legacy `generateContent` stream path when Mastra coding fails or is disabled.
+- Add feature flag:
+  - `V2_MASTRA_EDITOR_CODING_AGENT_ENABLED` (default `true`)
+- Status: `Completed (2026-02-23)`
+  - Updated:
+    - `app/lib/mastra/agents/editor.ts`
+    - `.env.example`
+  - Added unit coverage:
+    - Mastra-first path preferred when available
+    - fallback path used when Mastra coding throws
+  - Verified real E2E:
+    - `pnpm run v2:test:kimi:real` passed
+    - preview URL returned
+    - warnings array empty
+
+**Verify**
+- `pnpm exec vitest run tests/unit/mastra/editorAgent.test.ts`
+- `pnpm exec vitest run tests/integration/v2/bootstrapWorkflow.writefile.test.ts`
+- `pnpm run v2:test:kimi:real`
+
+**Done when**
+- Autonomous bootstrap uses Mastra agent as first coding engine while preserving reliability with deterministic fallback.
+
+---
+
 ### Step 7: Persist runtime/workspace metadata + memory wiring
 
 **Deliver**
