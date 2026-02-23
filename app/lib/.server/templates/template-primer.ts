@@ -58,14 +58,12 @@ ${file.content}
  * business data rather than generating new code from scratch.
  *
  * @param businessProfile - Business profile with data to inject
- * @param themePrompt - Theme-specific customization instructions
  * @param ignoredFiles - Files that should be read-only
  * @param templateName - Name of the template
  * @returns Formatted user message
  */
 export function buildCustomizationMessage(
   businessProfile: BusinessProfile,
-  themePrompt: string,
   ignoredFiles: TemplateFile[],
   templateName: string,
 ): string {
@@ -77,14 +75,6 @@ export function buildCustomizationMessage(
   logger.debug(`[TEMPLATE_PRIMER] Building customization message for "${businessName}"`);
 
   const parts: string[] = [];
-
-  // Theme instructions
-  if (themePrompt) {
-    parts.push(`TEMPLATE INSTRUCTIONS:
-${themePrompt}
-
----`);
-  }
 
   // Read-only file rules
   if (ignoredFiles.length > 0) {
@@ -206,7 +196,6 @@ Only <boltArtifact> and <boltAction> tags are parsed. Use them now.`);
  * @param ignoredFiles - Read-only files to reference
  * @param businessProfile - Business data for customization
  * @param templateName - Name of the template
- * @param themePrompt - Theme-specific instructions
  * @param title - Project title
  * @returns Both messages ready to use with streamText
  */
@@ -215,7 +204,6 @@ export function buildTemplatePrimingMessages(
   ignoredFiles: TemplateFile[],
   businessProfile: BusinessProfile,
   templateName: string,
-  themePrompt: string,
   title: string = 'Restaurant Website',
 ): TemplatePrimingMessages {
   logger.info(`[TEMPLATE_PRIMER] Building priming messages for template: ${templateName}`);
@@ -228,7 +216,7 @@ export function buildTemplatePrimingMessages(
   const allFilesForArtifact = [...includedFiles, ...ignoredFiles];
 
   const assistantMessage = buildTemplateFilesMessage(allFilesForArtifact, templateName, title);
-  const userMessage = buildCustomizationMessage(businessProfile, themePrompt, ignoredFiles, templateName);
+  const userMessage = buildCustomizationMessage(businessProfile, ignoredFiles, templateName);
 
   logger.info(`[TEMPLATE_PRIMER] Assistant message length: ${assistantMessage.length}`);
   logger.info(`[TEMPLATE_PRIMER] User message length: ${userMessage.length}`);

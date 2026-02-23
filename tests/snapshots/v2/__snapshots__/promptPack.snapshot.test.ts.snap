@@ -1,0 +1,300 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`promptPack snapshots > matches legacy content prompt snapshot 1`] = `
+"---
+BUSINESS PROFILE (REFERENCE DATA)
+
+Use the following data as the primary source of truth for generating website content.
+
+INSTRUCTIONS:
+- Extract exact business name, address, phone, hours, and menu items from this data
+- Integrate relevant facts naturally into website copy - do NOT paste verbatim
+- If details are missing, use sensible defaults without inventing specific claims
+- This data takes precedence over any conflicting template placeholders
+
+BRAND VOICE:
+Write all copy in a "warm and welcoming" voice.
+Primary USP: Slow-simmered broth for 16 hours
+Target audience: Families and office workers
+Visual style: modern minimal
+
+INDUSTRY CONTEXT:
+- Categories: Vietnamese, Noodle shop
+- Pricing Tier: $$
+- Highlights: Takeout, Dine-in
+
+REPUTATION & RATINGS:
+- Average Rating: 4.7/5
+- Total Reviews: 128
+- Trust Badges: Top Rated
+
+COLOR PALETTE (if provided):
+N/A
+
+TYPOGRAPHY (if provided):
+N/A
+
+LOGO (if provided):
+N/A
+
+<business_profile>
+BASIC INFO:
+- Display Name: Pho Nova
+- Tagline: Soulful bowls every day
+CONTACT:
+- Address: 123 Main St, San Jose, CA
+- Phone: (408) 555-0101
+HOURS:
+- monday: 9:00 AM - 9:00 PM
+- tuesday: 9:00 AM - 9:00 PM
+DEFAULTS USED: none
+MENU (if provided):
+- Pho
+  - Pho Dac Biet ($16.99) — House special beef noodle soup
+  - Pho Ga ($15.99)
+REVIEWS (if provided):
+- "Amazing broth and friendly service" — Alex (5/5)
+PHOTOS (if provided):
+- https://cdn.example.com/pho-1.jpg
+</business_profile>
+
+PRE-GENERATED CONTENT SUGGESTIONS (use as inspiration):
+N/A
+
+<full_business_profile_json>
+{
+  "crawled_data": {
+    "name": "Pho Nova",
+    "address": "123 Main St, San Jose, CA",
+    "phone": "(408) 555-0101",
+    "hours": {
+      "monday": "9:00 AM - 9:00 PM",
+      "tuesday": "9:00 AM - 9:00 PM"
+    },
+    "rating": 4.7,
+    "reviews_count": 128,
+    "menu": {
+      "categories": [
+        {
+          "name": "Pho",
+          "items": [
+            {
+              "name": "Pho Dac Biet",
+              "price": "$16.99",
+              "description": "House special beef noodle soup"
+            },
+            {
+              "name": "Pho Ga",
+              "price": "$15.99"
+            }
+          ]
+        }
+      ]
+    },
+    "reviews": [
+      {
+        "text": "Amazing broth and friendly service",
+        "author": "Alex",
+        "rating": 5
+      }
+    ],
+    "photos": [
+      {
+        "url": "https://cdn.example.com/pho-1.jpg"
+      }
+    ]
+  },
+  "generated_content": {
+    "businessIdentity": {
+      "displayName": "Pho Nova",
+      "tagline": "Soulful bowls every day"
+    },
+    "brandStrategy": {
+      "toneOfVoice": "warm and welcoming",
+      "usp": "Slow-simmered broth for 16 hours",
+      "targetAudience": "Families and office workers",
+      "visualStyle": "modern minimal"
+    },
+    "industryContext": {
+      "categories": [
+        "Vietnamese",
+        "Noodle shop"
+      ],
+      "pricingTier": "$$",
+      "operationalHighlights": [
+        "Takeout",
+        "Dine-in"
+      ]
+    },
+    "reputationData": {
+      "averageRating": 4.7,
+      "reviewsCount": 128,
+      "trustBadges": [
+        "Top Rated"
+      ]
+    }
+  }
+}
+</full_business_profile_json>
+---
+
+DATA USAGE INSTRUCTIONS:
+1. **Photos**: Use REAL image URLs from crawled_data.visual_content.image_collections:
+   - food: Use for menu section, hero backgrounds
+   - exterior: Use for hero section, about section
+   - interior: Use for atmosphere/ambiance section
+   - owner_uploads: High-quality official photos, prioritize these
+
+2. **Attributes**: Extract from crawled_data.operational_data.attributes:
+   - atmosphere: Use for describing the vibe (e.g., "Casual", "Cozy", "Trendy")
+   - offerings: Highlight in about section (e.g., "Vegetarian options", "Happy hour")
+   - highlights: Feature prominently (e.g., "Fast service")
+   - popular_for: Mention in hero/about (e.g., "Perfect for Lunch, Dinner, Solo dining")
+   - accessibility: Include in footer/contact (wheelchair accessible, etc.)
+
+3. **Reviews**: Use crawled_data.reviews_data.top_relevant_reviews:
+   - Extract 2-3 compelling quotes for testimonials section
+   - Use author_name for attribution
+   - Select reviews that highlight different strengths (food quality, service, atmosphere)
+
+4. **Menu**: Use crawled_data.operational_data.menu for complete menu section:
+   - Include ALL menu items with actual prices
+   - Group logically if categories aren't provided
+   - Use exact item names and prices from the data
+
+5. **Business Info**: Use crawled_data.operational_data for accurate details:
+   - phone_number: Exact phone number
+   - address_formatted: Full address
+   - open_hours_raw: Actual operating hours
+   - website_url_listed: Link to official website
+
+CONTENT REQUIREMENTS:
+1. MUST use the exact business name in header, footer, and meta title.
+2. MUST use the exact address and phone in the Contact section if provided.
+3. MUST use provided hours if available; otherwise display a sensible default message.
+4. MUST replace ALL placeholders in the template with business data (no lorem ipsum).
+5. MUST generate complete file contents (no TODOs).
+6. SHOULD incorporate the USP into the hero + about copy.
+7. SHOULD apply the provided color palette and typography (if present) while respecting the theme layout.
+8. SHOULD use the pre-generated content sections as a starting point for copy.
+9. SHOULD display rating/reviews count if available (e.g., "4.8★ from 120 reviews").
+
+TASK: Generate a complete, production-ready restaurant website using the business information above.
+
+Include sections: Hero, About, Menu, Contact, Footer."
+`;
+
+exports[`promptPack snapshots > matches markdown-first content prompt snapshot 1`] = `
+"---
+BUSINESS PROFILE (REFERENCE DATA)
+
+Use the following data as the primary source of truth for generating website content.
+
+INSTRUCTIONS:
+- Extract exact business name, address, phone, hours, and menu items from this data
+- Integrate relevant facts naturally into website copy - do NOT paste verbatim
+- If details are missing, use sensible defaults without inventing specific claims
+- This data takes precedence over any conflicting template placeholders
+
+<google_maps_data>
+# Google Maps
+
+- Name: Pho Nova
+- Address: 123 Main St
+</google_maps_data>
+
+<existing_website_analysis>
+# Existing Website
+
+Current site is clean and modern.
+</existing_website_analysis>
+
+Use the existing website analysis to match visual style and tone where appropriate.
+
+---
+
+CONTENT REQUIREMENTS:
+1. MUST use the exact business name in header, footer, and meta title.
+2. MUST use the exact address and phone in the Contact section if provided.
+3. MUST use provided hours if available.
+4. MUST replace ALL placeholders with business data (no lorem ipsum).
+5. MUST generate complete file contents (no TODOs).
+6. SHOULD use the website analysis to match visual style if available.
+
+TASK: Generate a complete, production-ready restaurant website using the business information above."
+`;
+
+exports[`promptPack snapshots > matches template selection context prompt snapshot 1`] = `
+"Business Profile:
+- Name: Pho Nova
+- Category: Vietnamese
+- Cuisine: vietnamese
+- Price Tier: mid
+- Style: minimalist
+- Keywords: Vietnamese, vietnamese, mid, minimalist, modern, minimal, warm
+- Tone: warm and welcoming
+- Visual Style: modern minimal
+- Rating: 4.7 (128 reviews)
+- Menu Categories: Pho
+- Data Source: legacy-profile"
+`;
+
+exports[`promptPack snapshots > matches template selection system prompt snapshot 1`] = `
+"You are selecting the best restaurant website template for a business.
+
+Available Templates:
+<template>
+  <name>Indochine Luxe</name>
+  <description>Luxurious Southeast Asian dining with colonial architecture and silk textiles</description>
+  <cuisines>vietnamese, french-indochine, luxury, fine-dining, colonial</cuisines>
+  <style>luxurious, colonial, silk, architectural, elegant</style>
+</template>
+
+<template>
+  <name>Artisan Hearth v3</name>
+  <description>Rustic farm-to-table with handcrafted aesthetics and warm, organic textures</description>
+  <cuisines>farm-to-table, american, new-american, organic, sustainable</cuisines>
+  <style>rustic, warm, handcrafted, organic, farmhouse</style>
+</template>
+
+<template>
+  <name>Fresh Market</name>
+  <description>Bright and airy farmers market concept with fresh produce photography</description>
+  <cuisines>mediterranean, healthy, vegetarian, farmers-market, light</cuisines>
+  <style>bright, airy, fresh, natural-lighting, produce-focused</style>
+</template>
+
+<template>
+  <name>Chromatic Street</name>
+  <description>Vibrant street food culture with neon accents and urban photography</description>
+  <cuisines>street-food, fusion, food-truck, international, casual</cuisines>
+  <style>vibrant, neon, urban, street-art, photography-focused</style>
+</template>
+
+<template>
+  <name>Bold Feast v2</name>
+  <description>Contemporary American bistro with bold flavors and industrial-chic design</description>
+  <cuisines>american, contemporary, bistro, gastropub, craft-cocktails</cuisines>
+  <style>bold, industrial, contemporary, urban, gastropub</style>
+</template>
+
+Select the SINGLE best matching template. Consider (in order):
+1. Cuisine alignment (e.g., Vietnamese vs Chinese vs Mediterranean)
+2. Price tier / experience (budget, mid, upscale, luxury)
+3. Brand style (minimalist, rustic, vibrant, dark-luxe, botanical, etc.)
+4. Ambiance keywords (cozy, romantic, modern, energetic, elegant)
+
+Examples (guidance, not strict rules):
+- Fine dining + French/luxury → Noir Luxe v3 OR Classic Minimalist v2
+- Casual + Asian → Bamboo Bistro OR Indochine Luxe
+- Street food + vibrant/urban → Chromatic Street OR The Red Noodle
+
+Response format:
+<selection>
+  <templateName>{exact template name from list}</templateName>
+  <reasoning>{1-2 sentence explanation}</reasoning>
+  <title>{a short site title}</title>
+</selection>
+
+Important: Provide only the selection tags in your response, no additional text."
+`;
