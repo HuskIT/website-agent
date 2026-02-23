@@ -3,6 +3,10 @@ import { action } from '~/routes/api.v2.site.bootstrap';
 
 const mockGetSession = vi.fn();
 const mockGetV2Flags = vi.fn();
+const mockSearchRestaurant = vi.fn();
+const mockExtractBusinessData = vi.fn();
+const mockGenerateGoogleMapsMarkdown = vi.fn();
+const mockCrawlWebsiteMarkdown = vi.fn();
 
 vi.mock('~/lib/auth/session.server', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
@@ -10,6 +14,13 @@ vi.mock('~/lib/auth/session.server', () => ({
 
 vi.mock('~/lib/config/v2Flags', () => ({
   getV2Flags: (...args: unknown[]) => mockGetV2Flags(...args),
+}));
+
+vi.mock('~/lib/services/crawlerClient.server', () => ({
+  searchRestaurant: (...args: unknown[]) => mockSearchRestaurant(...args),
+  extractBusinessData: (...args: unknown[]) => mockExtractBusinessData(...args),
+  generateGoogleMapsMarkdown: (...args: unknown[]) => mockGenerateGoogleMapsMarkdown(...args),
+  crawlWebsiteMarkdown: (...args: unknown[]) => mockCrawlWebsiteMarkdown(...args),
 }));
 
 interface ParsedSSEEvent {
@@ -46,6 +57,33 @@ describe('api.v2.site.bootstrap stream', () => {
       waitingInsightsEnabled: false,
     });
     mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mockSearchRestaurant.mockResolvedValue({
+      success: true,
+      data: {
+        name: 'Starbucks Reserve Roastery New York',
+        place_id: 'place-123',
+        data_id: 'data-123',
+        address: '61 9th Ave, New York, NY 10011',
+        website: 'https://www.starbucksreserve.com/',
+      },
+    });
+    mockExtractBusinessData.mockResolvedValue({
+      success: true,
+      place_id: 'place-123',
+      data: {
+        website: 'https://www.starbucksreserve.com/',
+      },
+    });
+    mockGenerateGoogleMapsMarkdown.mockResolvedValue({
+      success: true,
+      place_id: 'place-123',
+      markdown: '# Google Maps markdown',
+    });
+    mockCrawlWebsiteMarkdown.mockResolvedValue({
+      success: true,
+      place_id: 'place-123',
+      markdown: '# Website markdown',
+    });
   });
 
   it('streams deterministic milestone events in order', async () => {
@@ -72,7 +110,12 @@ describe('api.v2.site.bootstrap stream', () => {
       'completed',
     ]);
 
-    expect((events[0].data as Record<string, unknown>).businessName).toBe('Starbucks');
+    const inputValidated = events[0].data as Record<string, unknown>;
+    const crawlerStarted = events[1].data as Record<string, unknown>;
+
+    expect(inputValidated.placeId).toBe('place-123');
+    expect(crawlerStarted.mode).toBe('real');
+    expect(crawlerStarted.extractMethod).toBe('verified_place');
   });
 
   it('returns 400 for invalid bootstrap input', async () => {
