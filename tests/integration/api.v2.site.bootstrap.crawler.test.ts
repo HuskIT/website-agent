@@ -57,6 +57,10 @@ function parseSSEPayload(payload: string): ParsedSSEEvent[] {
 describe('api.v2.site.bootstrap crawler integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.MOONSHOT_API_KEY;
+    delete process.env.E2B_API_KEY;
+    delete process.env.E2B_API_TOKEN;
+    delete process.env.E2B_ACCESS_TOKEN;
     mockGetV2Flags.mockReturnValue({
       mastraEnabled: true,
       waitingInsightsEnabled: false,

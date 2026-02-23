@@ -93,10 +93,11 @@ export function buildTemplateSelectionContextPrompt(profile: BusinessProfile): s
   const tone = profile.generated_content?.brandStrategy?.toneOfVoice || '';
   const visualStyle = profile.generated_content?.brandStrategy?.visualStyle || '';
   const menuCategoryNames = profile.crawled_data?.menu?.categories?.map((c) => c.name).slice(0, 8) ?? [];
-  const menuHints = uniqueStrings([...menuCategoryNames, ...mapsSignals.menuCategories, ...websiteSignals.menuCategories]).slice(
-    0,
-    10,
-  );
+  const menuHints = uniqueStrings([
+    ...menuCategoryNames,
+    ...mapsSignals.menuCategories,
+    ...websiteSignals.menuCategories,
+  ]).slice(0, 10);
   const menuHint = menuHints.length ? `- Menu Categories: ${menuHints.join(', ')}` : '';
   const ratingHint = analysis.rating
     ? `- Rating: ${analysis.rating}${analysis.reviewsCount ? ` (${analysis.reviewsCount} reviews)` : ''}`
@@ -345,9 +346,11 @@ export function analyzeBusinessProfile(profile: BusinessProfile): BusinessProfil
 
   const cuisineCandidates = [...categories].map((c) => c.trim().toLowerCase()).filter(Boolean);
   const menuCategories = crawled?.menu?.categories?.map((c) => c.name.trim().toLowerCase()) ?? [];
-  const cuisine = [...cuisineCandidates, ...menuCategories, ...mapsSignals.cuisines, ...websiteSignals.cuisines][0] ?? category;
+  const cuisine =
+    [...cuisineCandidates, ...menuCategories, ...mapsSignals.cuisines, ...websiteSignals.cuisines][0] ?? category;
 
-  const rating = generated?.reputationData?.averageRating ?? crawled?.rating ?? mapsSignals.rating ?? websiteSignals.rating;
+  const rating =
+    generated?.reputationData?.averageRating ?? crawled?.rating ?? mapsSignals.rating ?? websiteSignals.rating;
   const reviewsCount = generated?.reputationData?.reviewsCount ?? crawled?.reviews_count;
 
   const pricingTier = generated?.industryContext?.pricingTier?.toLowerCase() ?? '';
@@ -472,6 +475,7 @@ function parseNameFromMarkdown(markdown: string): string | undefined {
   }
 
   const firstHeading = markdown.match(/^\s*#\s+(.+)$/m);
+
   return firstHeading?.[1]?.trim();
 }
 
@@ -480,6 +484,7 @@ function parseRatingFromMarkdown(markdown: string): number | undefined {
 
   if (stars?.[1]) {
     const parsed = Number(stars[1]);
+
     if (!Number.isNaN(parsed)) {
       return parsed;
     }
@@ -489,6 +494,7 @@ function parseRatingFromMarkdown(markdown: string): number | undefined {
 
   if (ratingLine?.[1]) {
     const parsed = Number(ratingLine[1]);
+
     if (!Number.isNaN(parsed)) {
       return parsed;
     }

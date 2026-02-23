@@ -325,7 +325,9 @@ export async function selectTemplate(
         hasGoogleMapsMarkdown: Boolean(businessProfile.google_maps_markdown),
         hasWebsiteMarkdown: Boolean(businessProfile.website_markdown),
         businessName:
-          businessProfile.generated_content?.businessIdentity?.displayName || businessProfile.crawled_data?.name || null,
+          businessProfile.generated_content?.businessIdentity?.displayName ||
+          businessProfile.crawled_data?.name ||
+          null,
       },
       segments: [
         { label: 'template_selection_system', text: system },
@@ -677,6 +679,7 @@ async function* _generateContentAttempt(
   const fullUserMessage = [`[Model: ${model}]`, '', `[Provider: ${provider.name}]`, '', userMessage].join('\n');
 
   messages.push({ role: 'user', content: fullUserMessage });
+
   const generationPromptTrace = buildPromptTracePayload({
     stage: 'content_generation',
     model,

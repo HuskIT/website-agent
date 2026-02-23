@@ -152,10 +152,14 @@ V1 remains live while V2 is feature-flagged.
 
 ## Current Constraints (Local Terminal)
 
-- Node in this terminal: `v14.17.3`
-- Repo requires Node `>=18.18.0`
-- Mastra packages are not currently installed in `node_modules`
-- V2 implementation/testing gates require environment upgrade first
+- Default shell Node path is still `v14.17.3` (`/usr/local/bin/node`), which cannot run project `pnpm` commands.
+- Node `v24.11.1` is available at `~/.nvm/versions/node/v24.11.1/bin/node` and is used for all V2 verification commands.
+- Repo requires Node `>=18.18.0`.
+- Mastra packages are installed:
+  - `@mastra/core@1.5.0`
+  - `@mastra/e2b@0.0.3`
+  - `@mastra/memory@1.4.0`
+- Until shell profile is normalized, verification commands must run with PATH override to Node 24.
 
 ## Branch
 
@@ -289,12 +293,133 @@ V1 remains live while V2 is feature-flagged.
 
 ---
 
-### Step 6: Mastra `bootstrapWebsite` workflow (`write_file` only)
+### Step 5.5: Database preflight gate (before any V2 execution)
 
 **Deliver**
-- Implement full autonomous bootstrap workflow in E2B.
-- Input: adapted crawler/business profile + template constraints.
-- Bounded build/fix/start-preview loop.
+- Add `app/lib/services/v2/databasePreflight.server.ts`.
+- Add route: `app/routes/api.v2.database.health.ts`.
+- Add script: `pnpm run v2:db:health`.
+- Gate `app/routes/api.v2.site.bootstrap.ts` with DB preflight before crawler/generation starts.
+
+**Verify**
+- Add and run: `pnpm exec vitest run tests/unit/services/v2/databasePreflight.server.test.ts`
+- Add and run: `pnpm exec vitest run tests/unit/routes/api.v2.database.health.test.ts`
+- Update and run: `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.stream.test.ts`
+- Manual: `pnpm run v2:db:health`
+
+**Done when**
+- V2 bootstrap returns clear `DATABASE_NOT_READY` errors when DB setup is missing/broken.
+- DB checks are directly verifiable before executing Step 6 workflow logic.
+
+---
+
+### Step 6: Real Mastra Coding Agent (`bootstrapWebsite`, write-file first)
+
+**Ground Truth (validated in repo)**
+- Mastra packages are installed and importable from `node_modules/@mastra/*`.
+- Mastra workflow API is validated against installed typings (vNext shape only):
+  - `createWorkflow(...).then(createStep(...)).commit()`
+  - `workflow.createRun()` + `run.start(...)` / `run.startAsync(...)`
+- Current behavior to preserve comes from:
+  - `app/routes/api.project.generate.ts`
+  - `app/lib/services/projectGenerationService.ts`
+  - `app/lib/.server/llm/stream-text.ts`
+  - `app/lib/.server/templates/template-primer.ts`
+  - `app/lib/services/contentGenerationValidator.ts`
+- Current stable model target is `Moonshot + kimi-for-coding`:
+  - `app/utils/defaults.ts`
+  - `app/lib/modules/llm/providers/moonshot.ts`
+  - `.env.example`
+- Reference direction for Step 6 implementation:
+  - `next-v/huskit-agent-blueprint.md` (workspace-centered runtime, write_file-first reliability)
+  - `next-v/mastra-deep-dive.md` (bounded fix loops, search/read-before-write safety, memory staged later)
+
+**Step 6.0: Dependency + API freeze (Mastra vNext only)**
+- Add and lock Mastra dependencies.
+- Freeze implementation to Workflows vNext API shape only:
+  - `createWorkflow(...).then(createStep(...)).commit()`
+  - run via `workflow.createRun()` + `run.start(...)` (or `run.startAsync(...)`)
+- No legacy workflow API mixing.
+- Status: `Completed (2026-02-23)`
+
+**Verify**
+- `pnpm run typecheck` (pass, Node 24 PATH override)
+- `pnpm exec vitest run tests/unit/mastra/workflowCompile.test.ts` (pass)
+
+**Done when**
+- Mastra imports resolve and minimal vNext workflow compiles in tests.
+
+---
+
+**Step 6.1: Prompt Pack extraction (behavior parity with current /generate)**
+- Extract reusable prompt pack builders from current generation service:
+  - template selection prompt/context
+  - content prompt composition (markdown-first path)
+  - theme injection compatibility with stream layer behavior
+- Keep output behavior unchanged from current generation path.
+- Status: `Completed (slice 1, 2026-02-23)`
+  - Added `app/lib/services/v2/promptPack.ts`
+  - Rewired `app/lib/services/projectGenerationService.ts` to use extracted prompt pack
+
+**Verify**
+- `pnpm exec vitest run tests/unit/services/v2/promptPack.test.ts` (pass)
+- `pnpm exec vitest run tests/snapshots/v2/promptPack.snapshot.test.ts -u` (pass, 4 snapshots written)
+- `pnpm run typecheck` (pass)
+
+**Done when**
+- Prompt builders match current flow behavior with deterministic tests.
+
+---
+
+**Step 6.2: E2B runtime adapter + Workspace runtime**
+- Implement V2 runtime adapter for workflow steps:
+  - create sandbox/session
+  - write files
+  - run commands
+  - start preview
+  - cleanup/pause
+- Add workspace-centered abstraction for short/long-term agent needs:
+  - filesystem tools
+  - command tools
+  - search/read helpers
+  - E2B-backed sandbox wiring
+- Keep `write_file` as default mutation policy.
+- Status: `Completed (slice 1, 2026-02-23)`
+  - Added `app/lib/mastra/runtime/workspaceFactory.server.ts`
+  - Added `app/lib/mastra/runtime/e2bRuntimeAdapter.server.ts`
+  - Added `tests/unit/mastra/workspaceFactory.test.ts`
+  - Added `tests/unit/mastra/e2bRuntimeAdapter.test.ts`
+
+**Verify**
+- Add and run: `pnpm exec vitest run tests/unit/mastra/e2bRuntimeAdapter.test.ts`
+- Add and run: `pnpm exec vitest run tests/unit/mastra/workspaceFactory.test.ts`
+- Manual: `pnpm run v2:sandbox:health`
+
+**Done when**
+- Workflow steps can reliably execute real sandbox actions through one adapter.
+
+---
+
+**Step 6.3: Implement real `bootstrapWebsite` workflow**
+- Implement workflow stages:
+  1. `prepare_context`
+  2. `select_template`
+  3. `load_template_files`
+  4. `generate_content_file`
+  5. `write_files_to_e2b`
+  6. `install_and_build`
+  7. `start_preview`
+  8. `collect_artifacts`
+- Add bounded build/fix loop (max retry attempts).
+- Keep planner internal only (no user approval step).
+- Status: `Completed (slice 2, 2026-02-23)`
+  - `app/lib/mastra/workflows/bootstrapWebsite.ts` now executes via Mastra vNext workflow runtime (`createWorkflow -> createStep -> createRun`).
+  - Added staged flow: `prepare_context`, `select_template`, `load_template_and_generate_content`, `write_files_to_e2b`, `install_and_build`, `start_preview`, `collect_artifacts`.
+  - Added bounded build retry handling with cleanup-on-failure.
+  - Existing mutation-only write-file behavior remains compatible for current tests/scripts.
+  - Verified in:
+    - `tests/unit/mastra/fileMutationStrategy.test.ts`
+    - `tests/integration/v2/bootstrapWorkflow.writefile.test.ts`
 
 **Verify**
 - Add and run: `pnpm exec vitest run tests/integration/v2/bootstrapWorkflow.writefile.test.ts`
@@ -302,23 +427,91 @@ V1 remains live while V2 is feature-flagged.
   - files are produced
   - build is attempted
   - preview start is attempted
+  - retry loop is bounded
 
 **Done when**
-- First draft generation is fully autonomous and reproducible.
+- First draft generation is autonomous and reproducible with deterministic retry behavior.
 
 ---
 
-### Step 7: Persist preview/session metadata
+**Step 6.4: Wire workflow into V2 bootstrap SSE route**
+- Integrate real workflow run in:
+  - `app/routes/api.v2.site.bootstrap.ts`
+- Preserve existing SSE milestone contract for frontend:
+  - `input_validated`
+  - `crawler_started`
+  - `generation_started`
+  - `preview_starting`
+  - `completed`
+  - `error`
+- Status: `Completed (2026-02-23)`
+  - Route now runs real `mastraCore.bootstrapWebsite.run(...)` after crawler resolution.
+  - Maintains deterministic SSE milestones for both autonomous and seed/mutation fallback modes.
+  - Added type-safe business profile normalization (`BusinessData`/`BusinessProfile`) before workflow input.
+  - Hardened stream/crawler integration tests to avoid local env key leakage in test mode.
+
+**Verify**
+- Update and run: `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.stream.test.ts`
+- Update and run: `pnpm exec vitest run tests/integration/api.v2.site.bootstrap.crawler.test.ts`
+- Regression set:
+  - `pnpm exec vitest run tests/integration/v2/bootstrapWorkflow.writefile.test.ts`
+  - `pnpm exec vitest run tests/unit/mastra/fileMutationStrategy.test.ts`
+  - `pnpm exec vitest run tests/unit/mastra/workspaceFactory.test.ts`
+  - `pnpm exec vitest run tests/unit/mastra/e2bRuntimeAdapter.test.ts`
+  - `pnpm exec vitest run tests/unit/mastra/workflowCompile.test.ts`
+
+**Done when**
+- Frontend receives stable milestones while backend uses real workflow execution.
+
+---
+
+**Step 6.5: Real acceptance smoke (crawler + mastra + e2b + preview)**
+- Add real Step 6 smoke command/script for end-to-end verification.
+- Validate:
+  - real crawler data consumed
+  - real E2B commands run
+  - preview URL returned
+  - generated files non-empty
+- Status: `Completed (2026-02-23)`
+  - Added script: `scripts/v2-step6-real-test.ts`
+  - Added command: `pnpm run v2:test:step6:real`
+  - Verified with real run (crawler + E2B):
+    - `extractMethod`: `verified_place`
+    - `filesWritten`: `4`
+    - `buildAttempts`: `1`
+    - `previewUrl`: returned (E2B host)
+    - markdown lengths: non-zero for both Google Maps and website
+
+**Verify**
+- Add and run: `pnpm run v2:test:step6:real`
+
+**Done when**
+- Step 6 is verifiable in one real command before moving to edit flow.
+
+---
+
+### Step 7: Persist runtime/workspace metadata + memory wiring
 
 **Deliver**
-- Persist V2 sandbox + preview metadata on project/session records.
-- Return preview URL on bootstrap completion.
+- Persist V2 runtime metadata on project/session records:
+  - sandbox/session id
+  - preview URL
+  - lifecycle state
+- Add project-scoped workspace session reuse strategy.
+- Add memory wiring (feature-flagged):
+  - resource scope = business/project
+  - thread scope = generation/edit session
+- Add rollout flags:
+  - `V2_WORKSPACE_ENABLED`
+  - `V2_MEMORY_ENABLED`
 
 **Verify**
 - Add and run: `pnpm exec vitest run tests/integration/v2/previewPersistence.test.ts`
+- Add and run: `pnpm exec vitest run tests/integration/v2/workspaceSessionReuse.test.ts`
+- Add and run: `pnpm exec vitest run tests/unit/services/v2/memoryWiring.test.ts`
 
 **Done when**
-- User reliably lands on live preview after bootstrap.
+- Preview/session continuity is reliable and memory hooks are ready for iterative edits.
 
 ---
 
@@ -384,8 +577,7 @@ V1 remains live while V2 is feature-flagged.
 
 ## Immediate Next Execution
 
-1. Complete Step -1 (Node/toolchain + Mastra dependency gate).
-2. Implement Step 0 only.
-3. Add Step 0 tests only.
-4. Run Step 0 verification gates.
-5. Stop for review before Step 1.
+1. Step 7: persist runtime/workspace metadata from V2 bootstrap runs (sandbox/session/preview state).
+2. Add project-scoped workspace session reuse wiring with feature flag gates.
+3. Add memory scaffolding behind `V2_MEMORY_ENABLED` without changing current user flow.
+4. Stop for your review before implementing waiting-screen insights (Step 8).

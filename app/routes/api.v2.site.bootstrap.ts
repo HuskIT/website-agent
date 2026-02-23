@@ -1,6 +1,8 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs, json } from '@remix-run/node';
+import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
 import { getSession } from '~/lib/auth/session.server';
 import { getV2Flags } from '~/lib/config/v2Flags';
+import { createMastraCore } from '~/lib/mastra/factory.server';
 import {
   crawlWebsiteMarkdown,
   extractBusinessData,
@@ -15,8 +17,14 @@ import {
   type V2BootstrapRequest,
   type V2BootstrapSSEEvent,
 } from '~/lib/services/v2/contracts';
-import type { CrawlRequest, CrawlWebsiteMarkdownResponse, SearchRestaurantResponse } from '~/types/crawler';
-import type { ProjectWithDetails } from '~/types/project';
+import type {
+  BusinessData,
+  CrawlRequest,
+  CrawlWebsiteMarkdownResponse,
+  SearchRestaurantResponse,
+} from '~/types/crawler';
+import type { BusinessProfile, ProjectWithDetails } from '~/types/project';
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from '~/utils/constants';
 
 const encoder = new TextEncoder();
 
@@ -49,6 +57,13 @@ function getWebsiteMarkdown(markdownResponse: CrawlWebsiteMarkdownResponse | nul
 
 function buildProjectAdapterInput(
   input: V2BootstrapRequest,
+  data: {
+    placeId: string;
+    sessionId: string;
+    googleMapsMarkdown?: string;
+    websiteMarkdown?: string;
+    extractData?: BusinessData;
+  },
 ): Pick<ProjectWithDetails, 'id' | 'name' | 'business_profile'> | null {
   if (!input.projectId) {
     return null;
@@ -57,7 +72,49 @@ function buildProjectAdapterInput(
   return {
     id: input.projectId,
     name: input.businessName ?? 'Untitled Business',
+    business_profile: {
+      place_id: data.placeId,
+      session_id: data.sessionId,
+      gmaps_url: input.mapsUrl ?? input.businessProfile?.gmaps_url,
+      crawled_at: new Date().toISOString(),
+      crawled_data: data.extractData,
+      google_maps_markdown: data.googleMapsMarkdown,
+      website_markdown: data.websiteMarkdown,
+    },
   };
+}
+
+function buildSeedOperations(params: {
+  placeId: string;
+  sessionId: string;
+  googleMapsMarkdown?: string;
+  websiteMarkdown?: string;
+  businessName?: string;
+  businessAddress?: string;
+}): Array<{ path: string; content: string }> {
+  return [
+    {
+      path: '/app/data/google-maps.md',
+      content: params.googleMapsMarkdown || '# Google Maps markdown unavailable',
+    },
+    {
+      path: '/app/data/website.md',
+      content: params.websiteMarkdown || '# Website markdown unavailable',
+    },
+    {
+      path: '/app/data/business-profile.json',
+      content: JSON.stringify(
+        {
+          businessName: params.businessName ?? null,
+          businessAddress: params.businessAddress ?? null,
+          placeId: params.placeId,
+          sessionId: params.sessionId,
+        },
+        null,
+        2,
+      ),
+    },
+  ];
 }
 
 async function resolveCrawlerData(input: V2BootstrapRequest): Promise<{
@@ -65,6 +122,7 @@ async function resolveCrawlerData(input: V2BootstrapRequest): Promise<{
   extractMethod: 'maps_url' | 'verified_place' | 'name_address';
   placeId: string;
   sessionId: string;
+  extractData?: BusinessData;
   googleMapsMarkdown?: string;
   websiteMarkdown?: string;
 }> {
@@ -123,81 +181,13 @@ async function resolveCrawlerData(input: V2BootstrapRequest): Promise<{
         : 'name_address',
     placeId,
     sessionId,
+    extractData: extractResult.data,
     googleMapsMarkdown:
       mapsMarkdownResult.success && typeof mapsMarkdownResult.markdown === 'string'
         ? mapsMarkdownResult.markdown
         : undefined,
     websiteMarkdown: getWebsiteMarkdown(websiteMarkdownResult),
   };
-}
-
-function buildBootstrapMilestones(
-  input: V2BootstrapRequest,
-  data: Awaited<ReturnType<typeof resolveCrawlerData>>,
-): V2BootstrapSSEEvent[] {
-  const projectCandidate = buildProjectAdapterInput(input);
-  const adaptedInput = adaptBootstrapInput({
-    project: projectCandidate,
-    searchResult: data.searchResult.success && data.searchResult.data ? data.searchResult.data : null,
-    extractPayload: {
-      place_id: data.placeId,
-      session_id: data.sessionId,
-      google_maps_markdown: data.googleMapsMarkdown,
-      website_markdown: data.websiteMarkdown,
-    },
-    fallback: {
-      businessName: input.businessName,
-      businessAddress: input.businessAddress,
-      mapsUrl: input.mapsUrl,
-      sessionId: data.sessionId,
-      placeId: data.placeId,
-    },
-  });
-
-  const projectId = adaptedInput.projectId ?? null;
-  const businessName = adaptedInput.businessName ?? null;
-  const businessAddress = adaptedInput.businessAddress ?? null;
-  const placeId = adaptedInput.placeId ?? adaptedInput.businessProfile?.place_id ?? null;
-
-  return [
-    createStubEvent('input_validated', {
-      projectId,
-      businessName,
-      businessAddress,
-      placeId,
-      contractVersion: 'v2',
-    }),
-    createStubEvent('crawler_started', {
-      projectId,
-      mode: 'real',
-      extractMethod: data.extractMethod,
-      searchSuccess: data.searchResult.success,
-      hasGoogleMapsMarkdown: Boolean(data.googleMapsMarkdown),
-      hasWebsiteMarkdown: Boolean(data.websiteMarkdown),
-    }),
-    createStubEvent('generation_started', {
-      projectId,
-      mode: 'stub',
-      strategy: 'write_file',
-      nextStep: 'step6_mastra_bootstrap',
-    }),
-    createStubEvent('preview_starting', {
-      projectId,
-      provider: 'stub',
-      nextStep: 'step7_preview_persistence',
-    }),
-    createStubEvent('completed', {
-      projectId,
-      status: 'stub_completed',
-      readyFor: 'step6_mastra_bootstrap',
-      placeId,
-      sessionId: data.sessionId,
-      markdown: {
-        googleMapsLength: data.googleMapsMarkdown?.length ?? 0,
-        websiteLength: data.websiteMarkdown?.length ?? 0,
-      },
-    }),
-  ];
 }
 
 export async function loader(_request: LoaderFunctionArgs) {
@@ -271,11 +261,163 @@ export async function action({ request }: ActionFunctionArgs) {
     async start(controller) {
       try {
         const crawlerData = await resolveCrawlerData(parsedBody.data);
-        const milestones = buildBootstrapMilestones(parsedBody.data, crawlerData);
+        const projectCandidate = buildProjectAdapterInput(parsedBody.data, crawlerData);
+        const adaptedInput = adaptBootstrapInput({
+          project: projectCandidate,
+          searchResult:
+            crawlerData.searchResult.success && crawlerData.searchResult.data ? crawlerData.searchResult.data : null,
+          extractPayload: {
+            place_id: crawlerData.placeId,
+            session_id: crawlerData.sessionId,
+            google_maps_markdown: crawlerData.googleMapsMarkdown,
+            website_markdown: crawlerData.websiteMarkdown,
+          },
+          fallback: {
+            businessName: parsedBody.data.businessName,
+            businessAddress: parsedBody.data.businessAddress,
+            mapsUrl: parsedBody.data.mapsUrl,
+            sessionId: crawlerData.sessionId,
+            placeId: crawlerData.placeId,
+          },
+        });
 
-        for (const event of milestones) {
-          controller.enqueue(toSSEChunk(event));
-        }
+        const workflowProjectId = adaptedInput.projectId ?? parsedBody.data.projectId ?? crypto.randomUUID();
+        const businessProfile: BusinessProfile = {
+          place_id: adaptedInput.placeId ?? adaptedInput.businessProfile?.place_id,
+          session_id: adaptedInput.sessionId ?? adaptedInput.businessProfile?.session_id,
+          gmaps_url: parsedBody.data.mapsUrl ?? adaptedInput.mapsUrl ?? adaptedInput.businessProfile?.gmaps_url,
+          crawled_at: new Date().toISOString(),
+          crawled_data: crawlerData.extractData,
+          google_maps_markdown: crawlerData.googleMapsMarkdown ?? adaptedInput.businessProfile?.google_maps_markdown,
+          website_markdown: crawlerData.websiteMarkdown ?? adaptedInput.businessProfile?.website_markdown,
+        };
+        const cookieHeader = request.headers.get('Cookie');
+        const apiKeys = getApiKeysFromCookie(cookieHeader);
+        const providerSettings = getProviderSettingsFromCookie(cookieHeader);
+        const hasMoonshotKey = Boolean(apiKeys.MOONSHOT_API_KEY || process.env.MOONSHOT_API_KEY);
+        const hasE2BKey = Boolean(process.env.E2B_API_KEY || process.env.E2B_API_TOKEN || process.env.E2B_ACCESS_TOKEN);
+        const shouldRunAutonomous = Boolean(businessProfile.google_maps_markdown && hasMoonshotKey);
+        const provider = {
+          name: DEFAULT_PROVIDER?.name ?? 'Moonshot',
+          staticModels: [],
+        };
+        const baseUrl = new URL(request.url).origin;
+        const workflowInput = shouldRunAutonomous
+          ? {
+              projectId: workflowProjectId,
+              businessProfile,
+              generation: {
+                model: DEFAULT_MODEL,
+                provider,
+                baseUrl,
+                cookieHeader,
+                env: process.env as any,
+                apiKeys,
+                providerSettings,
+              },
+              runtime: hasE2BKey
+                ? {
+                    workspace: {
+                      projectId: workflowProjectId,
+                    },
+                    buildCwd: '/home/project',
+                    installCommand: 'pnpm install',
+                    buildCommand: 'pnpm run build',
+                    maxBuildAttempts: 2,
+                    preview: {
+                      port: 4173,
+                    },
+                  }
+                : undefined,
+            }
+          : {
+              projectId: workflowProjectId,
+              operations: buildSeedOperations({
+                placeId: crawlerData.placeId,
+                sessionId: crawlerData.sessionId,
+                googleMapsMarkdown: crawlerData.googleMapsMarkdown,
+                websiteMarkdown: crawlerData.websiteMarkdown,
+                businessName: adaptedInput.businessName,
+                businessAddress: adaptedInput.businessAddress,
+              }),
+            };
+        const mastraCore = createMastraCore();
+        const inMemoryWrites = new Map<string, string>();
+
+        controller.enqueue(
+          toSSEChunk(
+            createStubEvent('input_validated', {
+              projectId: workflowProjectId,
+              businessName: adaptedInput.businessName ?? null,
+              businessAddress: adaptedInput.businessAddress ?? null,
+              placeId: adaptedInput.placeId ?? adaptedInput.businessProfile?.place_id ?? null,
+              contractVersion: 'v2',
+            }),
+          ),
+        );
+        controller.enqueue(
+          toSSEChunk(
+            createStubEvent('crawler_started', {
+              projectId: workflowProjectId,
+              mode: 'real',
+              extractMethod: crawlerData.extractMethod,
+              searchSuccess: crawlerData.searchResult.success,
+              hasGoogleMapsMarkdown: Boolean(crawlerData.googleMapsMarkdown),
+              hasWebsiteMarkdown: Boolean(crawlerData.websiteMarkdown),
+            }),
+          ),
+        );
+        controller.enqueue(
+          toSSEChunk(
+            createStubEvent('generation_started', {
+              projectId: workflowProjectId,
+              mode: shouldRunAutonomous ? 'mastra_autonomous' : 'mastra_seed',
+              strategy: mastraCore.mutationStrategy.mode,
+              hasE2BSandbox: hasE2BKey,
+            }),
+          ),
+        );
+
+        const workflowResult = await mastraCore.bootstrapWebsite.run(workflowInput, {
+          writeFile: async (filePath: string, content: string) => {
+            inMemoryWrites.set(filePath, content);
+          },
+        });
+
+        controller.enqueue(
+          toSSEChunk(
+            createStubEvent('preview_starting', {
+              projectId: workflowProjectId,
+              provider: workflowResult.preview?.url ? 'e2b' : 'none',
+              previewUrl: workflowResult.preview?.url ?? null,
+            }),
+          ),
+        );
+        controller.enqueue(
+          toSSEChunk(
+            createStubEvent('completed', {
+              projectId: workflowProjectId,
+              status: workflowResult.success ? 'completed' : 'completed_with_warnings',
+              mode: shouldRunAutonomous ? 'mastra_autonomous' : 'mastra_seed',
+              template: workflowResult.template ?? null,
+              previewUrl: workflowResult.preview?.url ?? null,
+              mutation: {
+                mode: workflowResult.mutation.mode,
+                applied: workflowResult.mutation.applied,
+                failures: workflowResult.mutation.failures.length,
+              },
+              generatedFiles: workflowResult.generatedFiles?.length ?? inMemoryWrites.size,
+              buildAttempts: workflowResult.buildAttempts ?? 0,
+              warnings: workflowResult.warnings ?? [],
+              placeId: crawlerData.placeId,
+              sessionId: crawlerData.sessionId,
+              markdown: {
+                googleMapsLength: crawlerData.googleMapsMarkdown?.length ?? 0,
+                websiteLength: crawlerData.websiteMarkdown?.length ?? 0,
+              },
+            }),
+          ),
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to stream bootstrap milestones';
         const errorEvent = createStubEvent('error', { message });

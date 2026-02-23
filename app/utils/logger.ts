@@ -50,7 +50,19 @@ interface Logger {
   setLevel: (level: DebugLevel) => void;
 }
 
-let currentLevel: DebugLevel = import.meta.env.VITE_LOG_LEVEL || (import.meta.env.DEV ? 'debug' : 'info');
+type RuntimeImportMetaEnv = {
+  VITE_LOG_LEVEL?: string;
+  DEV?: boolean;
+  PROD?: boolean;
+};
+
+const runtimeEnv = (import.meta as ImportMeta & { env?: RuntimeImportMetaEnv }).env;
+const runtimeNodeEnv = typeof process !== 'undefined' ? process.env.NODE_ENV : undefined;
+const runtimeIsDev = runtimeEnv?.DEV ?? runtimeNodeEnv !== 'production';
+const runtimeIsProd = runtimeEnv?.PROD ?? runtimeNodeEnv === 'production';
+
+let currentLevel: DebugLevel =
+  (runtimeEnv?.VITE_LOG_LEVEL as DebugLevel | undefined) || (runtimeIsDev ? 'debug' : 'info');
 
 export const logger: Logger = {
   trace: (...messages: any[]) => logWithDebugCapture('trace', undefined, messages),
@@ -73,7 +85,7 @@ export function createScopedLogger(scope: string): Logger {
 }
 
 function setLevel(level: DebugLevel) {
-  if ((level === 'trace' || level === 'debug') && import.meta.env.PROD) {
+  if ((level === 'trace' || level === 'debug') && runtimeIsProd) {
     return;
   }
 
