@@ -8,6 +8,7 @@ import {
   searchRestaurant,
 } from '~/lib/services/crawlerClient.server';
 import { adaptBootstrapInput } from '~/lib/services/v2/bootstrapInputAdapter';
+import { runV2DatabasePreflight } from '~/lib/services/v2/databasePreflight.server';
 import {
   V2BootstrapRequestSchema,
   V2BootstrapSSEEventSchema,
@@ -248,6 +249,21 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       },
       { status: 400 },
+    );
+  }
+
+  const dbPreflight = await runV2DatabasePreflight();
+
+  if (!dbPreflight.ok) {
+    return json(
+      {
+        error: {
+          code: 'DATABASE_NOT_READY',
+          message: dbPreflight.error ?? 'V2 database preflight failed.',
+          details: dbPreflight,
+        },
+      },
+      { status: 503 },
     );
   }
 

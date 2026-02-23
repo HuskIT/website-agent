@@ -7,6 +7,7 @@ const mockSearchRestaurant = vi.fn();
 const mockExtractBusinessData = vi.fn();
 const mockGenerateGoogleMapsMarkdown = vi.fn();
 const mockCrawlWebsiteMarkdown = vi.fn();
+const mockRunV2DatabasePreflight = vi.fn();
 
 vi.mock('~/lib/auth/session.server', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
@@ -21,6 +22,10 @@ vi.mock('~/lib/services/crawlerClient.server', () => ({
   extractBusinessData: (...args: unknown[]) => mockExtractBusinessData(...args),
   generateGoogleMapsMarkdown: (...args: unknown[]) => mockGenerateGoogleMapsMarkdown(...args),
   crawlWebsiteMarkdown: (...args: unknown[]) => mockCrawlWebsiteMarkdown(...args),
+}));
+
+vi.mock('~/lib/services/v2/databasePreflight.server', () => ({
+  runV2DatabasePreflight: (...args: unknown[]) => mockRunV2DatabasePreflight(...args),
 }));
 
 interface ParsedSSEEvent {
@@ -66,6 +71,12 @@ describe('api.v2.site.bootstrap crawler integration', () => {
       success: true,
       place_id: 'place-123',
       markdown: '# Website markdown',
+    });
+    mockRunV2DatabasePreflight.mockResolvedValue({
+      ok: true,
+      checkedAt: '2026-02-23T00:00:00.000Z',
+      checks: {},
+      warnings: [],
     });
   });
 

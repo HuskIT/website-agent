@@ -7,6 +7,7 @@ const mockSearchRestaurant = vi.fn();
 const mockExtractBusinessData = vi.fn();
 const mockGenerateGoogleMapsMarkdown = vi.fn();
 const mockCrawlWebsiteMarkdown = vi.fn();
+const mockRunV2DatabasePreflight = vi.fn();
 
 vi.mock('~/lib/auth/session.server', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
@@ -21,6 +22,10 @@ vi.mock('~/lib/services/crawlerClient.server', () => ({
   extractBusinessData: (...args: unknown[]) => mockExtractBusinessData(...args),
   generateGoogleMapsMarkdown: (...args: unknown[]) => mockGenerateGoogleMapsMarkdown(...args),
   crawlWebsiteMarkdown: (...args: unknown[]) => mockCrawlWebsiteMarkdown(...args),
+}));
+
+vi.mock('~/lib/services/v2/databasePreflight.server', () => ({
+  runV2DatabasePreflight: (...args: unknown[]) => mockRunV2DatabasePreflight(...args),
 }));
 
 interface ParsedSSEEvent {
@@ -84,6 +89,12 @@ describe('api.v2.site.bootstrap stream', () => {
       place_id: 'place-123',
       markdown: '# Website markdown',
     });
+    mockRunV2DatabasePreflight.mockResolvedValue({
+      ok: true,
+      checkedAt: '2026-02-23T00:00:00.000Z',
+      checks: {},
+      warnings: [],
+    });
   });
 
   it('streams deterministic milestone events in order', async () => {
@@ -128,5 +139,30 @@ describe('api.v2.site.bootstrap stream', () => {
     const response = await action({ request } as any);
 
     expect(response.status).toBe(400);
+  });
+
+  it('returns 503 when database preflight fails', async () => {
+    mockRunV2DatabasePreflight.mockResolvedValue({
+      ok: false,
+      checkedAt: '2026-02-23T00:00:00.000Z',
+      checks: {},
+      warnings: [],
+      error: 'Database preflight failed for V2 bootstrap prerequisites.',
+    });
+
+    const request = new Request('http://localhost/api/v2/site/bootstrap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        businessName: 'Starbucks',
+        businessAddress: 'New York, NY',
+      }),
+    });
+
+    const response = await action({ request } as any);
+    const body = (await response.json()) as any;
+
+    expect(response.status).toBe(503);
+    expect(body.error.code).toBe('DATABASE_NOT_READY');
   });
 });
