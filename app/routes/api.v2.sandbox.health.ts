@@ -33,6 +33,6 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const result = await runE2BHealthProbe();
+
   return json(result, { status: result.ok ? 200 : 502 });
 }
-

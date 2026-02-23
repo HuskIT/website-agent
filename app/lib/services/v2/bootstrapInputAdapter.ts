@@ -56,4 +56,3 @@ export function adaptBootstrapInput(params: AdaptBootstrapInputParams): V2Bootst
 
   return V2BootstrapRequestSchema.parse(candidate);
 }
-

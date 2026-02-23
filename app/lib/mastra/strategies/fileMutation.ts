@@ -98,4 +98,3 @@ export class EditFileStrategy implements FileMutationStrategy {
 export function getDefaultFileMutationStrategy(): FileMutationStrategy {
   return new WriteFileStrategy();
 }
-

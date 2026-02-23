@@ -1,8 +1,5 @@
 import { getDefaultFileMutationStrategy, type FileMutationStrategy } from '~/lib/mastra/strategies/fileMutation';
-import {
-  createBootstrapWebsiteWorkflow,
-  type BootstrapWebsiteWorkflow,
-} from '~/lib/mastra/workflows/bootstrapWebsite';
+import { createBootstrapWebsiteWorkflow, type BootstrapWebsiteWorkflow } from '~/lib/mastra/workflows/bootstrapWebsite';
 import { createEditWebsiteWorkflow, type EditWebsiteWorkflow } from '~/lib/mastra/workflows/editWebsite';
 
 export interface MastraCore {
@@ -18,4 +15,3 @@ export function createMastraCore(strategy: FileMutationStrategy = getDefaultFile
     editWebsite: createEditWebsiteWorkflow(strategy),
   };
 }
-

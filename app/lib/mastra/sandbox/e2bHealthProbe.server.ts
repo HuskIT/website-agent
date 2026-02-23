@@ -66,6 +66,7 @@ function parseNodeVersion(commandResult: any): string | null {
   }
 
   const textLike = commandResult?.stdout?.toString?.() ?? commandResult?.output?.toString?.();
+
   if (typeof textLike === 'string') {
     return textLike.trim() || null;
   }
@@ -100,6 +101,7 @@ async function runNodeVersionCommand(sandbox: any): Promise<string> {
     try {
       const result = await run();
       const parsed = parseNodeVersion(result);
+
       if (parsed) {
         return parsed;
       }
@@ -108,9 +110,7 @@ async function runNodeVersionCommand(sandbox: any): Promise<string> {
     }
   }
 
-  throw new Error(
-    `Unable to execute "node --version" in E2B sandbox${lastError ? `: ${String(lastError)}` : ''}`,
-  );
+  throw new Error(`Unable to execute "node --version" in E2B sandbox${lastError ? `: ${String(lastError)}` : ''}`);
 }
 
 async function cleanupSandbox(sandbox: any): Promise<void> {
@@ -156,6 +156,7 @@ export async function runE2BHealthProbe(): Promise<E2BHealthProbeResult> {
 
   try {
     sandbox = await createSandbox(moduleRef, apiKey);
+
     const nodeVersion = await runNodeVersionCommand(sandbox);
 
     return {
@@ -167,6 +168,7 @@ export async function runE2BHealthProbe(): Promise<E2BHealthProbeResult> {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
     // Keep this server-safe for direct script execution (outside Vite runtime).
     console.error('[e2bHealthProbe] probe failed:', message);
 
